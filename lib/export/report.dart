@@ -46,6 +46,7 @@ ReportData assembleReportData({
   required List<Medication> medications,
   required List<SymptomType> symptomTypes,
   required List<SymptomEntry> symptomEntries,
+  required Map<int, List<MedicationWindow>> windowsByMedicationId,
   required DateRange range,
   required DateTime today,
 }) {
@@ -63,10 +64,7 @@ ReportData assembleReportData({
     medications: medications,
     symptomTypes: symptomTypes,
     symptomEntries: symptomEntries,
-    windowsByMedicationId: {
-      for (final medication in medications)
-        medication.id!: deriveWindows(medication, periods, range),
-    },
+    windowsByMedicationId: windowsByMedicationId,
     months: [
       for (var offset = 0; offset < monthCount; offset++)
         DateTime(firstMonth.year, firstMonth.month + offset),

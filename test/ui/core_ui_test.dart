@@ -101,6 +101,120 @@ void main() {
     expect(find.text('Progesterone  200 mg'), findsOneWidget);
   });
 
+  testWidgets('course ended early and restored updates calendar bands', (
+    tester,
+  ) async {
+    await periods.insert(
+      Period(start: DateTime(2026, 6, 1), end: DateTime(2026, 6, 5)),
+      today: today,
+    );
+    final medication = await medications.insert(
+      Medication(
+        name: 'Progesterone',
+        dose: '200 mg',
+        schedule: CyclicalMedicationSchedule(startCycleDay: 1, durationDays: 4),
+        active: true,
+      ),
+    );
+    await _pumpApp(
+      tester,
+      periods,
+      medications,
+      symptoms,
+      settings,
+      database,
+      today,
+    );
+    final laterBand = find.byKey(
+      ValueKey('medication-band-2026-06-04-${medication.id}'),
+    );
+    expect(laterBand, findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('day-2026-06-02')));
+    await _pumpFrames(tester);
+    final actions = find.byKey(
+      ValueKey('course-actions-${medication.id}-2026-06-01'),
+    );
+    await tester.tap(actions);
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Course ended on 2 Jun 2026'));
+    await _pumpFrames(tester);
+
+    expect(
+      find.text('Progesterone  200 mg · ended 2 Jun 2026'),
+      findsOneWidget,
+    );
+    await tester.tapAt(const Offset(10, 10));
+    await _pumpFrames(tester);
+    expect(
+      find.byKey(ValueKey('medication-band-2026-06-02-${medication.id}')),
+      findsOneWidget,
+    );
+    expect(laterBand, findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('day-2026-06-02')));
+    await _pumpFrames(tester);
+    await tester.tap(actions);
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Restore full course'));
+    await _pumpFrames(tester);
+    await tester.tapAt(const Offset(10, 10));
+    await _pumpFrames(tester);
+
+    expect(laterBand, findsOneWidget);
+  });
+
+  testWidgets('skipped course remains discoverable and restorable', (
+    tester,
+  ) async {
+    await periods.insert(
+      Period(start: DateTime(2026, 6, 1), end: DateTime(2026, 6, 5)),
+      today: today,
+    );
+    final medication = await medications.insert(
+      Medication(
+        name: 'Progesterone',
+        dose: '200 mg',
+        schedule: CyclicalMedicationSchedule(startCycleDay: 1, durationDays: 4),
+        active: true,
+      ),
+    );
+    await medications.setAdjustment(
+      WindowAdjustment(
+        medicationId: medication.id!,
+        sourcePeriodStart: DateTime(2026, 6, 1),
+        kind: WindowAdjustmentKind.skipped,
+      ),
+    );
+    await _pumpApp(
+      tester,
+      periods,
+      medications,
+      symptoms,
+      settings,
+      database,
+      today,
+    );
+    final band = find.byKey(
+      ValueKey('medication-band-2026-06-03-${medication.id}'),
+    );
+    expect(band, findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('day-2026-06-03')));
+    await _pumpFrames(tester);
+    expect(find.text('Progesterone  200 mg · skipped'), findsOneWidget);
+    await tester.tap(
+      find.byKey(ValueKey('course-actions-${medication.id}-2026-06-01')),
+    );
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Restore full course'));
+    await _pumpFrames(tester);
+    await tester.tapAt(const Offset(10, 10));
+    await _pumpFrames(tester);
+
+    expect(band, findsOneWidget);
+  });
+
   testWidgets('symptom chip cycles through clear and persists after re-pump', (
     tester,
   ) async {

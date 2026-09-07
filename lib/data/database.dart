@@ -29,7 +29,7 @@ Future<Database> openHmmmDatabase({
   return selectedFactory.openDatabase(
     databasePath,
     options: OpenDatabaseOptions(
-      version: 1,
+      version: 2,
       onConfigure: (database) => database.execute('PRAGMA foreign_keys = ON'),
       onCreate: (database, version) async {
         final batch = database.batch();
@@ -79,6 +79,16 @@ Future<Database> openHmmmDatabase({
           CREATE TABLE settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
+          )
+        ''');
+        batch.execute('''
+          CREATE TABLE window_adjustments (
+            id INTEGER PRIMARY KEY,
+            medication_id INTEGER NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
+            source_period_start TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN ('ended_early','skipped')),
+            end_date TEXT,
+            UNIQUE(medication_id, source_period_start)
           )
         ''');
         for (final name in _builtinSymptomTypes) {

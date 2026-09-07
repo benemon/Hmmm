@@ -32,18 +32,24 @@ void main() {
         SymptomEntry(date: DateTime(2026, 5, 1), typeId: 1, severity: 1),
       ];
       final today = DateTime(2026, 6, 15);
+      final range = DateRange(
+        start: DateTime(2026, 4, 1),
+        end: DateTime(2026, 6, 15),
+      );
+      final windowsByMedicationId = {
+        1: deriveWindows(medications.single, periods, range),
+      };
       final data = assembleReportData(
         periods: periods,
         medications: medications,
         symptomTypes: types,
         symptomEntries: entries,
-        range: DateRange(
-          start: DateTime(2026, 4, 1),
-          end: DateTime(2026, 6, 15),
-        ),
+        windowsByMedicationId: windowsByMedicationId,
+        range: range,
         today: today,
       );
 
+      expect(data.windowsByMedicationId, windowsByMedicationId);
       expect(data.cycleLengths, cycleLengthsToNext(periods));
       expect(
         _cycleDayValues(data.symptomCycleDayCounts),

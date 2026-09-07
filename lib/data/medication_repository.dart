@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../domain/dates.dart';
+import '../domain/hrt_window.dart';
 import '../domain/models.dart';
 import '../domain/validation.dart';
 
@@ -88,8 +89,97 @@ class MedicationRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<List<WindowAdjustment>> listAdjustments() async {
+    final rows = await _database.rawQuery('''
+      SELECT medication_id, source_period_start, kind, end_date
+      FROM window_adjustments
+      ORDER BY medication_id ASC, source_period_start ASC
+    ''');
+    return rows.map(_windowAdjustmentFromRow).toList();
+  }
+
+  Future<void> setAdjustment(WindowAdjustment adjustment) async {
+    if (adjustment.kind == WindowAdjustmentKind.endedEarly &&
+        adjustment.endDate == null) {
+      throw ArgumentError('End date is required for an ended course.');
+    }
+    await _database.rawInsert(
+      '''
+      INSERT INTO window_adjustments(
+        medication_id, source_period_start, kind, end_date
+      ) VALUES (?, ?, ?, ?)
+      ON CONFLICT(medication_id, source_period_start) DO UPDATE SET
+        kind = excluded.kind,
+        end_date = excluded.end_date
+      ''',
+      [
+        adjustment.medicationId,
+        dateToIso(adjustment.sourcePeriodStart),
+        adjustment.kind == WindowAdjustmentKind.endedEarly
+            ? 'ended_early'
+            : 'skipped',
+        adjustment.kind == WindowAdjustmentKind.endedEarly
+            ? dateToIso(adjustment.endDate!)
+            : null,
+      ],
+    );
+    notifyListeners();
+  }
+
+  Future<void> clearAdjustment(
+    int medicationId,
+    DateTime sourcePeriodStart,
+  ) async {
+    await _database.rawDelete(
+      '''
+      DELETE FROM window_adjustments
+      WHERE medication_id = ? AND source_period_start = ?
+      ''',
+      [medicationId, dateToIso(sourcePeriodStart)],
+    );
+    notifyListeners();
+  }
+
+  Future<
+    ({
+      List<WindowAdjustment> adjustments,
+      Map<int, List<MedicationWindow>> windowsByMedicationId,
+    })
+  >
+  loadAdjustedWindows({
+    required List<Medication> medications,
+    required List<Period> periods,
+    required DateRange range,
+  }) async {
+    final adjustments = await listAdjustments();
+    return (
+      adjustments: adjustments,
+      windowsByMedicationId: {
+        for (final medication in medications)
+          medication.id!: deriveAdjustedWindows(
+            medication,
+            periods,
+            range,
+            adjustments,
+          ),
+      },
+    );
+  }
+
   void refresh() => notifyListeners();
 }
+
+WindowAdjustment _windowAdjustmentFromRow(Map<String, Object?> row) =>
+    WindowAdjustment(
+      medicationId: row['medication_id'] as int,
+      sourcePeriodStart: dateFromIso(row['source_period_start'] as String),
+      kind: row['kind'] == 'ended_early'
+          ? WindowAdjustmentKind.endedEarly
+          : WindowAdjustmentKind.skipped,
+      endDate: row['end_date'] == null
+          ? null
+          : dateFromIso(row['end_date'] as String),
+    );
 
 Medication _medicationFromRow(Map<String, Object?> row) {
   final MedicationSchedule schedule;

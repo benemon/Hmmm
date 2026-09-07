@@ -330,6 +330,123 @@ void main() {
       expect(windows.single.sourcePeriodStart, isNull);
     });
   });
+
+  group('window adjustments', () {
+    final source = DateTime(2026, 6, 1);
+    late MedicationWindow window;
+
+    setUp(() {
+      window = MedicationWindow(
+        start: DateTime(2026, 6, 15),
+        end: DateTime(2026, 6, 26),
+        sourcePeriodStart: source,
+      );
+    });
+
+    test('ended early shortens a window to a mid-window date', () {
+      final adjusted = applyWindowAdjustments(
+        medicationId: 1,
+        windows: [window],
+        adjustments: [
+          WindowAdjustment(
+            medicationId: 1,
+            sourcePeriodStart: source,
+            kind: WindowAdjustmentKind.endedEarly,
+            endDate: DateTime(2026, 6, 18),
+          ),
+        ],
+      );
+
+      expect(adjusted.single.end, DateTime(2026, 6, 18));
+    });
+
+    test('ended early before the window start becomes a one-day course', () {
+      final adjusted = applyWindowAdjustments(
+        medicationId: 1,
+        windows: [window],
+        adjustments: [
+          WindowAdjustment(
+            medicationId: 1,
+            sourcePeriodStart: source,
+            kind: WindowAdjustmentKind.endedEarly,
+            endDate: DateTime(2026, 6, 10),
+          ),
+        ],
+      );
+
+      expect(adjusted.single.start, DateTime(2026, 6, 15));
+      expect(adjusted.single.end, DateTime(2026, 6, 15));
+    });
+
+    test('ended early beyond the original end is a no-op', () {
+      final adjusted = applyWindowAdjustments(
+        medicationId: 1,
+        windows: [window],
+        adjustments: [
+          WindowAdjustment(
+            medicationId: 1,
+            sourcePeriodStart: source,
+            kind: WindowAdjustmentKind.endedEarly,
+            endDate: DateTime(2026, 7, 1),
+          ),
+        ],
+      );
+
+      expect(adjusted, [window]);
+    });
+
+    test('skipped removes the window', () {
+      final adjusted = applyWindowAdjustments(
+        medicationId: 1,
+        windows: [window],
+        adjustments: [
+          WindowAdjustment(
+            medicationId: 1,
+            sourcePeriodStart: source,
+            kind: WindowAdjustmentKind.skipped,
+          ),
+        ],
+      );
+
+      expect(adjusted, isEmpty);
+    });
+
+    test('an adjustment for a different source period changes nothing', () {
+      final adjusted = applyWindowAdjustments(
+        medicationId: 1,
+        windows: [window],
+        adjustments: [
+          WindowAdjustment(
+            medicationId: 1,
+            sourcePeriodStart: DateTime(2026, 5, 1),
+            kind: WindowAdjustmentKind.skipped,
+          ),
+        ],
+      );
+
+      expect(adjusted, [window]);
+    });
+
+    test('continuous windows are unaffected', () {
+      final continuous = MedicationWindow(
+        start: DateTime(2026, 6, 1),
+        end: DateTime(2026, 6, 30),
+      );
+      final adjusted = applyWindowAdjustments(
+        medicationId: 1,
+        windows: [continuous],
+        adjustments: [
+          WindowAdjustment(
+            medicationId: 1,
+            sourcePeriodStart: source,
+            kind: WindowAdjustmentKind.skipped,
+          ),
+        ],
+      );
+
+      expect(adjusted, [continuous]);
+    });
+  });
 }
 
 Medication _cyclicalMedication({

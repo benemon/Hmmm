@@ -54,11 +54,18 @@ class _DayDetailSheetState extends State<DayDetailSheet> {
     final medications = await widget.medicationRepository.listMedications();
     final types = await widget.symptomRepository.listTypes();
     final entries = await widget.symptomRepository.listEntries();
+    final windows = await widget.medicationRepository.loadAdjustedWindows(
+      medications: medications,
+      periods: periods,
+      range: DateRange(start: DateTime(1, 1, 1), end: DateTime(9999, 12, 31)),
+    );
     return _DayDetailData(
       periods: periods,
       medications: medications,
       types: types,
       entries: entries,
+      adjustments: windows.adjustments,
+      windowsByMedicationId: windows.windowsByMedicationId,
     );
   }
 
@@ -112,6 +119,7 @@ class _DayDetailSheetState extends State<DayDetailSheet> {
                       today: widget.today,
                       data: data,
                       periodRepository: widget.periodRepository,
+                      medicationRepository: widget.medicationRepository,
                       symptomRepository: widget.symptomRepository,
                     ),
                   );
@@ -131,12 +139,16 @@ class _DayDetailData {
     required this.medications,
     required this.types,
     required this.entries,
+    required this.adjustments,
+    required this.windowsByMedicationId,
   });
 
   final List<Period> periods;
   final List<Medication> medications;
   final List<SymptomType> types;
   final List<SymptomEntry> entries;
+  final List<WindowAdjustment> adjustments;
+  final Map<int, List<MedicationWindow>> windowsByMedicationId;
 }
 
 class _DayPage extends StatelessWidget {
@@ -145,6 +157,7 @@ class _DayPage extends StatelessWidget {
     required this.today,
     required this.data,
     required this.periodRepository,
+    required this.medicationRepository,
     required this.symptomRepository,
   });
 
@@ -152,6 +165,7 @@ class _DayPage extends StatelessWidget {
   final DateTime today;
   final _DayDetailData data;
   final PeriodRepository periodRepository;
+  final MedicationRepository medicationRepository;
   final SymptomRepository symptomRepository;
 
   @override
@@ -172,13 +186,49 @@ class _DayPage extends StatelessWidget {
       for (final entry in data.entries)
         if (entry.date == date) entry.typeId: entry,
     };
-    final coveringMedications = data.medications.where((medication) {
-      return deriveWindows(
+    final coveringMedications =
+        <
+          ({
+            Medication medication,
+            DateTime? sourcePeriodStart,
+            WindowAdjustment? adjustment,
+          })
+        >[];
+    for (final medication in data.medications) {
+      final originalWindows = deriveWindows(
         medication,
         data.periods,
         DateRange(start: date, end: date),
-      ).isNotEmpty;
-    }).toList();
+      );
+      for (final original in originalWindows) {
+        final sourcePeriodStart = original.sourcePeriodStart;
+        final adjustment = sourcePeriodStart == null
+            ? null
+            : data.adjustments
+                  .where(
+                    (candidate) =>
+                        candidate.medicationId == medication.id &&
+                        candidate.sourcePeriodStart == sourcePeriodStart,
+                  )
+                  .firstOrNull;
+        final adjustedCoversDate =
+            data.windowsByMedicationId[medication.id]?.any(
+              (window) =>
+                  window.sourcePeriodStart == sourcePeriodStart &&
+                  !date.isBefore(window.start) &&
+                  !date.isAfter(window.end),
+            ) ??
+            false;
+        if (adjustedCoversDate ||
+            adjustment?.kind == WindowAdjustmentKind.skipped) {
+          coveringMedications.add((
+            medication: medication,
+            sourcePeriodStart: sourcePeriodStart,
+            adjustment: adjustment,
+          ));
+        }
+      }
+    }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
@@ -232,10 +282,43 @@ class _DayPage extends StatelessWidget {
           ],
           if (coveringMedications.isNotEmpty) ...[
             const SizedBox(height: 22),
-            for (final medication in coveringMedications)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text('${medication.name}  ${medication.dose}'),
+            for (final course in coveringMedications)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text(
+                  '${course.medication.name}  ${course.medication.dose}'
+                  '${_adjustmentLabel(course.adjustment)}',
+                ),
+                trailing: course.sourcePeriodStart == null
+                    ? null
+                    : PopupMenuButton<_CourseAction>(
+                        key: ValueKey(
+                          'course-actions-${course.medication.id}-'
+                          '${dateToIso(course.sourcePeriodStart!)}',
+                        ),
+                        tooltip: 'Course adjustment',
+                        onSelected: (action) => _adjustCourse(
+                          course.medication.id!,
+                          course.sourcePeriodStart!,
+                          action,
+                        ),
+                        itemBuilder: (context) => [
+                          PopupMenuItem(
+                            value: _CourseAction.endedEarly,
+                            child: Text('Course ended on ${formatDate(date)}'),
+                          ),
+                          const PopupMenuItem(
+                            value: _CourseAction.skipped,
+                            child: Text('Course skipped'),
+                          ),
+                          if (course.adjustment != null)
+                            const PopupMenuItem(
+                              value: _CourseAction.restore,
+                              child: Text('Restore full course'),
+                            ),
+                        ],
+                      ),
               ),
           ],
           const SizedBox(height: 22),
@@ -291,6 +374,30 @@ class _DayPage extends StatelessWidget {
       ),
     );
     if (confirmed == true) await periodRepository.delete(period.id!);
+  }
+
+  Future<void> _adjustCourse(
+    int medicationId,
+    DateTime sourcePeriodStart,
+    _CourseAction action,
+  ) async {
+    if (action == _CourseAction.restore) {
+      await medicationRepository.clearAdjustment(
+        medicationId,
+        sourcePeriodStart,
+      );
+      return;
+    }
+    await medicationRepository.setAdjustment(
+      WindowAdjustment(
+        medicationId: medicationId,
+        sourcePeriodStart: sourcePeriodStart,
+        kind: action == _CourseAction.endedEarly
+            ? WindowAdjustmentKind.endedEarly
+            : WindowAdjustmentKind.skipped,
+        endDate: action == _CourseAction.endedEarly ? date : null,
+      ),
+    );
   }
 
   Future<void> _startPeriod(BuildContext context) async {
@@ -410,6 +517,15 @@ class _DayPage extends StatelessWidget {
       if (context.mounted) showValidationError(context, error);
     }
   }
+}
+
+enum _CourseAction { endedEarly, skipped, restore }
+
+String _adjustmentLabel(WindowAdjustment? adjustment) {
+  if (adjustment == null) return '';
+  return adjustment.kind == WindowAdjustmentKind.skipped
+      ? ' · skipped'
+      : ' · ended ${formatDate(adjustment.endDate!)}';
 }
 
 class _SymptomChip extends StatelessWidget {

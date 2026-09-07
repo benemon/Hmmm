@@ -102,6 +102,35 @@ class Medication {
   int get hashCode => Object.hash(id, name, dose, schedule, active, notes);
 }
 
+enum WindowAdjustmentKind { endedEarly, skipped }
+
+class WindowAdjustment {
+  WindowAdjustment({
+    required this.medicationId,
+    required DateTime sourcePeriodStart,
+    required this.kind,
+    DateTime? endDate,
+  }) : sourcePeriodStart = dateOnly(sourcePeriodStart),
+       endDate = endDate == null ? null : dateOnly(endDate);
+
+  final int medicationId;
+  final DateTime sourcePeriodStart;
+  final WindowAdjustmentKind kind;
+  final DateTime? endDate;
+
+  @override
+  bool operator ==(Object other) =>
+      other is WindowAdjustment &&
+      medicationId == other.medicationId &&
+      sourcePeriodStart == other.sourcePeriodStart &&
+      kind == other.kind &&
+      endDate == other.endDate;
+
+  @override
+  int get hashCode =>
+      Object.hash(medicationId, sourcePeriodStart, kind, endDate);
+}
+
 class SymptomType {
   const SymptomType({this.id, required this.name, required this.builtin});
 

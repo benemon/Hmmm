@@ -1,9 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hmmm/data/database.dart';
+import 'package:hmmm/data/medication_repository.dart';
 import 'package:hmmm/domain/hrt_window.dart';
 import 'package:hmmm/domain/models.dart';
 import 'package:hmmm/export/ics.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
+  setUpAll(sqfliteFfiInit);
+
   test('all-day events use exclusive DTEND dates and CRLF lines', () {
     final output = buildIcs(
       periods: [
@@ -97,5 +102,56 @@ void main() {
       first,
       contains('UID:hmmm-medication-progesterone-2026-05-10@hmmm.local\r\n'),
     );
+  });
+
+  test('shared adjusted-window assembly omits a skipped ICS event', () async {
+    final database = await openHmmmDatabase(
+      factory: databaseFactoryFfiNoIsolate,
+      path: inMemoryDatabasePath,
+    );
+    final repository = MedicationRepository(database);
+    final medication = await repository.insert(
+      Medication(
+        name: 'Progesterone',
+        dose: '200 mg',
+        schedule: CyclicalMedicationSchedule(startCycleDay: 1, durationDays: 4),
+        active: true,
+      ),
+    );
+    final period = Period(start: DateTime(2026, 6, 1));
+    await repository.setAdjustment(
+      WindowAdjustment(
+        medicationId: medication.id!,
+        sourcePeriodStart: period.start,
+        kind: WindowAdjustmentKind.skipped,
+      ),
+    );
+    final range = DateRange(
+      start: DateTime(2026, 6, 1),
+      end: DateTime(2026, 6, 30),
+    );
+    final windows = await repository.loadAdjustedWindows(
+      medications: [medication],
+      periods: [period],
+      range: range,
+    );
+
+    final output = buildIcs(
+      periods: const [],
+      windowsByMedication: [
+        IcsMedicationWindows(
+          name: medication.name,
+          windows: windows.windowsByMedicationId[medication.id!]!,
+        ),
+      ],
+      symptomDaysByType: const [],
+      range: range,
+      exportedAt: DateTime(2026, 6, 15),
+    );
+
+    expect(output, isNot(contains('SUMMARY:Progesterone')));
+    expect(output, isNot(contains('hmmm-medication-progesterone')));
+    repository.dispose();
+    await database.close();
   });
 }

@@ -48,16 +48,30 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   Future<_CalendarData> _loadData() async {
     final periods = await widget.periodRepository.listPeriods();
-    final medications = await widget.medicationRepository.listMedications();
+    final medications = (await widget.medicationRepository.listMedications())
+        .where(
+          (medication) => medicationHasDerivableWindows(medication, periods),
+        )
+        .toList();
     final entries = await widget.symptomRepository.listEntries();
+    final currentMonth = DateTime(widget.today.year, widget.today.month);
+    final finalMonth = _lastDerivedMonth(currentMonth, medications, periods);
+    final windows = await widget.medicationRepository.loadAdjustedWindows(
+      medications: medications,
+      periods: periods,
+      range: DateRange(
+        start: DateTime(
+          currentMonth.year,
+          currentMonth.month - _pastMonthCount,
+        ),
+        end: DateTime(finalMonth.year, finalMonth.month + 1, 0),
+      ),
+    );
     return _CalendarData(
       periods: periods,
-      medications: medications
-          .where(
-            (medication) => medicationHasDerivableWindows(medication, periods),
-          )
-          .toList(),
+      medications: medications,
       entries: entries,
+      windowsByMedicationId: windows.windowsByMedicationId,
     );
   }
 
@@ -152,11 +166,13 @@ class _CalendarData {
     required this.periods,
     required this.medications,
     required this.entries,
+    required this.windowsByMedicationId,
   });
 
   final List<Period> periods;
   final List<Medication> medications;
   final List<SymptomEntry> entries;
+  final Map<int, List<MedicationWindow>> windowsByMedicationId;
 }
 
 class _CalendarLegend extends StatelessWidget {
@@ -244,7 +260,11 @@ class _MonthStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final currentMonth = DateTime(today.year, today.month);
-    final finalMonth = _lastDerivedMonth(currentMonth);
+    final finalMonth = _lastDerivedMonth(
+      currentMonth,
+      data.medications,
+      data.periods,
+    );
     final futureMonthCount = _monthsBetween(currentMonth, finalMonth) + 1;
 
     return ListView.builder(
@@ -261,43 +281,16 @@ class _MonthStrip extends StatelessWidget {
     );
   }
 
-  DateTime _lastDerivedMonth(DateTime currentMonth) {
-    var lastDate = DateTime(currentMonth.year, currentMonth.month + 1, 0);
-    for (final medication in data.medications) {
-      final schedule = medication.schedule;
-      if (schedule is! CyclicalMedicationSchedule) continue;
-      for (final period in data.periods) {
-        if (!cyclicalScheduleAppliesToPeriodStart(schedule, period.start)) {
-          continue;
-        }
-        final end = addCalendarDays(
-          period.start,
-          schedule.startCycleDay + schedule.durationDays - 2,
-        );
-        if (end.isAfter(lastDate)) lastDate = end;
-      }
-    }
-    return DateTime(lastDate.year, lastDate.month);
-  }
-
   int _monthsBetween(DateTime start, DateTime end) =>
       (end.year - start.year) * 12 + end.month - start.month;
 
   Widget _buildMonth(BuildContext context, DateTime month) {
-    final range = DateRange(
-      start: month,
-      end: DateTime(month.year, month.month + 1, 0),
-    );
-    final windowsByMedicationId = <int, List<MedicationWindow>>{
-      for (final medication in data.medications)
-        medication.id!: deriveWindows(medication, data.periods, range),
-    };
     return _MonthSection(
       month: month,
       today: today,
       periods: data.periods,
       medications: data.medications,
-      windowsByMedicationId: windowsByMedicationId,
+      windowsByMedicationId: data.windowsByMedicationId,
       laneByMedicationId: laneByMedicationId,
       entries: data.entries,
       onDayTap: onDayTap,
@@ -469,6 +462,10 @@ class _DayCell extends StatelessWidget {
                   children: [
                     for (final medication in marker.medicationMarkers)
                       Positioned(
+                        key: ValueKey(
+                          'medication-band-${dateToIso(date)}-'
+                          '${medication.medicationId}',
+                        ),
                         top: medication.laneIndex * 4,
                         left: 0,
                         right: 0,
@@ -519,3 +516,26 @@ const _pastMonthCount = 2400;
 
 double _monthExtent(int medicationCount) =>
     100 + 6 * (72 + medicationCount * 4);
+
+DateTime _lastDerivedMonth(
+  DateTime currentMonth,
+  List<Medication> medications,
+  List<Period> periods,
+) {
+  var lastDate = DateTime(currentMonth.year, currentMonth.month + 1, 0);
+  for (final medication in medications) {
+    final schedule = medication.schedule;
+    if (schedule is! CyclicalMedicationSchedule) continue;
+    for (final period in periods) {
+      if (!cyclicalScheduleAppliesToPeriodStart(schedule, period.start)) {
+        continue;
+      }
+      final end = addCalendarDays(
+        period.start,
+        schedule.startCycleDay + schedule.durationDays - 2,
+      );
+      if (end.isAfter(lastDate)) lastDate = end;
+    }
+  }
+  return DateTime(lastDate.year, lastDate.month);
+}

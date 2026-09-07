@@ -21,7 +21,7 @@ void main() {
 
   tearDown(() => database.close());
 
-  test('schema v1 exists and built-in symptom types are seeded', () async {
+  test('schema v2 exists and built-in symptom types are seeded', () async {
     final tableRows = await database.query(
       'sqlite_master',
       columns: ['name'],
@@ -36,6 +36,7 @@ void main() {
         'symptom_types',
         'symptom_entries',
         'settings',
+        'window_adjustments',
       ]),
     );
 
@@ -192,6 +193,77 @@ void main() {
     await repository.delete(inserted.id!);
     expect(await repository.listMedications(), isEmpty);
   });
+
+  test(
+    'window adjustment upsert replaces and medication delete cascades',
+    () async {
+      final repository = MedicationRepository(database);
+      var notifications = 0;
+      repository.addListener(() => notifications++);
+      final medication = await repository.insert(
+        Medication(
+          name: 'Progesterone',
+          dose: '200 mg',
+          schedule: CyclicalMedicationSchedule(
+            startCycleDay: 15,
+            durationDays: 12,
+          ),
+          active: true,
+        ),
+      );
+      final sourcePeriodStart = DateTime(2026, 6, 1);
+      await repository.setAdjustment(
+        WindowAdjustment(
+          medicationId: medication.id!,
+          sourcePeriodStart: sourcePeriodStart,
+          kind: WindowAdjustmentKind.endedEarly,
+          endDate: DateTime(2026, 6, 18),
+        ),
+      );
+      final adjustmentId = (await database.query(
+        'window_adjustments',
+        columns: ['id'],
+      )).single['id'];
+
+      await repository.setAdjustment(
+        WindowAdjustment(
+          medicationId: medication.id!,
+          sourcePeriodStart: sourcePeriodStart,
+          kind: WindowAdjustmentKind.skipped,
+        ),
+      );
+
+      expect(await repository.listAdjustments(), [
+        WindowAdjustment(
+          medicationId: medication.id!,
+          sourcePeriodStart: sourcePeriodStart,
+          kind: WindowAdjustmentKind.skipped,
+        ),
+      ]);
+      expect(
+        (await database.query(
+          'window_adjustments',
+          columns: ['id'],
+        )).single['id'],
+        adjustmentId,
+      );
+      expect(notifications, 3);
+
+      await repository.clearAdjustment(medication.id!, sourcePeriodStart);
+      expect(await repository.listAdjustments(), isEmpty);
+      expect(notifications, 4);
+
+      await repository.setAdjustment(
+        WindowAdjustment(
+          medicationId: medication.id!,
+          sourcePeriodStart: sourcePeriodStart,
+          kind: WindowAdjustmentKind.skipped,
+        ),
+      );
+      await repository.delete(medication.id!);
+      expect(await repository.listAdjustments(), isEmpty);
+    },
+  );
 
   test('custom symptom type insert and read', () async {
     final repository = SymptomRepository(database);

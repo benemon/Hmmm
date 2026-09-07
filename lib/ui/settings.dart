@@ -116,13 +116,19 @@ class SettingsScreen extends StatelessWidget {
     final data = await _loadData();
     if (!context.mounted) return;
     final range = _rangeForMonths(today, months);
+    final windows = await medicationRepository.loadAdjustedWindows(
+      medications: data.medications,
+      periods: data.periods,
+      range: range,
+    );
+    if (!context.mounted) return;
     final text = buildIcs(
       periods: data.periods,
       windowsByMedication: [
         for (final medication in data.medications)
           IcsMedicationWindows(
             name: medication.name,
-            windows: deriveWindows(medication, data.periods, range),
+            windows: windows.windowsByMedicationId[medication.id!]!,
           ),
       ],
       symptomDaysByType: [
@@ -227,12 +233,19 @@ class SettingsScreen extends StatelessWidget {
     final months = await _chooseRange(context);
     if (months == null) return;
     final source = await _loadData();
+    final range = _rangeForMonths(today, months);
+    final windows = await medicationRepository.loadAdjustedWindows(
+      medications: source.medications,
+      periods: source.periods,
+      range: range,
+    );
     final data = assembleReportData(
       periods: source.periods,
       medications: source.medications,
       symptomTypes: source.symptomTypes,
       symptomEntries: source.symptomEntries,
-      range: _rangeForMonths(today, months),
+      windowsByMedicationId: windows.windowsByMedicationId,
+      range: range,
       today: today,
     );
     final bytes = await buildReportPdf(data);

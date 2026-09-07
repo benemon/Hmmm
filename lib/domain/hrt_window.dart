@@ -45,14 +45,71 @@ List<MedicationWindow> deriveWindows(
   List<Period> periods,
   DateRange range,
 ) {
+  return _clipWindows(_deriveWindows(medication, periods, range), range);
+}
+
+List<MedicationWindow> deriveAdjustedWindows(
+  Medication medication,
+  List<Period> periods,
+  DateRange range,
+  List<WindowAdjustment> adjustments,
+) => _clipWindows(
+  applyWindowAdjustments(
+    medicationId: medication.id!,
+    windows: _deriveWindows(medication, periods, range),
+    adjustments: adjustments,
+  ),
+  range,
+);
+
+List<MedicationWindow> applyWindowAdjustments({
+  required int medicationId,
+  required List<MedicationWindow> windows,
+  required List<WindowAdjustment> adjustments,
+}) {
+  final bySourcePeriod = {
+    for (final adjustment in adjustments)
+      if (adjustment.medicationId == medicationId)
+        adjustment.sourcePeriodStart: adjustment,
+  };
+  final adjusted = <MedicationWindow>[];
+  for (final window in windows) {
+    final sourcePeriodStart = window.sourcePeriodStart;
+    if (sourcePeriodStart == null) {
+      adjusted.add(window);
+      continue;
+    }
+    final adjustment = bySourcePeriod[sourcePeriodStart];
+    if (adjustment == null) {
+      adjusted.add(window);
+      continue;
+    }
+    if (adjustment.kind == WindowAdjustmentKind.skipped) continue;
+    final adjustedEnd = adjustment.endDate!;
+    adjusted.add(
+      MedicationWindow(
+        start: window.start,
+        end: adjustedEnd.isBefore(window.start)
+            ? window.start
+            : adjustedEnd.isAfter(window.end)
+            ? window.end
+            : adjustedEnd,
+        sourcePeriodStart: sourcePeriodStart,
+      ),
+    );
+  }
+  return adjusted;
+}
+
+List<MedicationWindow> _deriveWindows(
+  Medication medication,
+  List<Period> periods,
+  DateRange range,
+) {
   final schedule = medication.schedule;
   if (schedule is ContinuousMedicationSchedule) {
     final end = schedule.end ?? range.end;
-    final clipped = _clipWindow(schedule.start, end, range);
-    if (clipped == null) {
-      return const [];
-    }
-    return [MedicationWindow(start: clipped.$1, end: clipped.$2)];
+    return [MedicationWindow(start: schedule.start, end: end)];
   }
 
   final cyclical = schedule as CyclicalMedicationSchedule;
@@ -63,19 +120,25 @@ List<MedicationWindow> deriveWindows(
     }
     final start = addCalendarDays(period.start, cyclical.startCycleDay - 1);
     final end = addCalendarDays(start, cyclical.durationDays - 1);
-    final clipped = _clipWindow(start, end, range);
-    if (clipped != null) {
-      windows.add(
-        MedicationWindow(
-          start: clipped.$1,
-          end: clipped.$2,
-          sourcePeriodStart: period.start,
-        ),
-      );
-    }
+    windows.add(
+      MedicationWindow(start: start, end: end, sourcePeriodStart: period.start),
+    );
   }
   return windows;
 }
+
+List<MedicationWindow> _clipWindows(
+  List<MedicationWindow> windows,
+  DateRange range,
+) => [
+  for (final window in windows)
+    if (_clipWindow(window.start, window.end, range) case final clipped?)
+      MedicationWindow(
+        start: clipped.$1,
+        end: clipped.$2,
+        sourcePeriodStart: window.sourcePeriodStart,
+      ),
+];
 
 bool cyclicalScheduleAppliesToPeriodStart(
   CyclicalMedicationSchedule schedule,
