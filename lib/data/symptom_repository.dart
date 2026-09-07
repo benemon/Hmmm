@@ -30,6 +30,11 @@ class SymptomRepository extends ChangeNotifier {
     return SymptomType(id: id, name: type.name, builtin: type.builtin);
   }
 
+  Future<void> deleteType(int id) async {
+    await _database.rawDelete('DELETE FROM symptom_types WHERE id = ?', [id]);
+    notifyListeners();
+  }
+
   Future<List<SymptomEntry>> listEntries() async {
     final rows = await _database.rawQuery('''
       SELECT id, date, type_id, severity, note

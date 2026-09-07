@@ -202,6 +202,33 @@ void main() {
     expect(inserted.builtin, isFalse);
   });
 
+  test('deleting a symptom type cascades only its entries', () async {
+    final repository = SymptomRepository(database);
+    final custom = await repository.insertType(
+      const SymptomType(name: 'dizziness', builtin: false),
+    );
+    final today = DateTime(2026, 6, 15);
+    await repository.upsertEntry(
+      SymptomEntry(
+        date: DateTime(2026, 6, 10),
+        typeId: custom.id!,
+        severity: 2,
+      ),
+      today: today,
+    );
+    await repository.upsertEntry(
+      SymptomEntry(date: DateTime(2026, 6, 11), typeId: 1, severity: 1),
+      today: today,
+    );
+
+    await repository.deleteType(custom.id!);
+
+    expect(await repository.listTypes(), isNot(contains(custom)));
+    final entries = await repository.listEntries();
+    expect(entries, hasLength(1));
+    expect(entries.single.typeId, 1);
+  });
+
   test('symptom entries round trip and upsert by date and type', () async {
     final repository = SymptomRepository(database);
     final type = (await repository.listTypes()).first;

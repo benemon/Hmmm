@@ -18,6 +18,7 @@ import '../export/report.dart';
 import 'feedback.dart';
 import 'medications.dart';
 import 'period_records.dart';
+import 'symptom_types.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({
@@ -67,6 +68,16 @@ class SettingsScreen extends StatelessWidget {
                   repository: periodRepository,
                   today: today,
                 ),
+              ),
+            ),
+          ),
+          ListTile(
+            title: const Text('Symptom types'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (context) =>
+                    SymptomTypesScreen(repository: symptomRepository),
               ),
             ),
           ),

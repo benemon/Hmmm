@@ -154,12 +154,11 @@ class _MedicationTile extends StatelessWidget {
             const PopupMenuItem(
               value: _MedicationAction.stop,
               child: Text('Stop'),
-            )
-          else
-            const PopupMenuItem(
-              value: _MedicationAction.delete,
-              child: Text('Delete'),
             ),
+          const PopupMenuItem(
+            value: _MedicationAction.delete,
+            child: Text('Delete'),
+          ),
         ],
       ),
     );
@@ -198,13 +197,17 @@ class _MedicationTile extends StatelessWidget {
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            content: Text('Delete ${medication.name}?'),
+            content: Text(
+              'Delete ${medication.name}? All its derived windows disappear '
+              'from the calendar and exports.',
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
                 child: const Text('Cancel'),
               ),
               FilledButton(
+                key: const ValueKey('confirm-delete-medication'),
                 onPressed: () => Navigator.pop(context, true),
                 child: const Text('Delete'),
               ),
@@ -241,13 +244,33 @@ class _MedicationFormScreen extends StatefulWidget {
 
 enum _ScheduleType { cyclical, continuous }
 
+const _doseUnits = [
+  'mg',
+  'micrograms',
+  'g',
+  'ml',
+  'tablets',
+  'capsules',
+  'pumps',
+  'sprays',
+  'patches',
+];
+
 class _MedicationFormScreenState extends State<_MedicationFormScreen> {
+  late final _DoseParts? _parsedDose = widget.medication == null
+      ? const _DoseParts(amount: '', unit: 'mg')
+      : _parseDose(widget.medication!.dose);
+  late final bool _usesLegacyDose =
+      widget.medication != null && _parsedDose == null;
   late final TextEditingController _nameController = TextEditingController(
     text: widget.medication?.name ?? '',
   );
   late final TextEditingController _doseController = TextEditingController(
     text: widget.medication?.dose ?? '',
   );
+  late final TextEditingController _doseAmountController =
+      TextEditingController(text: _parsedDose?.amount ?? '');
+  late String _doseUnit = _parsedDose?.unit ?? _doseUnits.first;
   late final TextEditingController _cycleDayController = TextEditingController(
     text: _cyclical?.startCycleDay.toString() ?? '15',
   );
@@ -277,6 +300,7 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
   void dispose() {
     _nameController.dispose();
     _doseController.dispose();
+    _doseAmountController.dispose();
     _cycleDayController.dispose();
     _durationController.dispose();
     super.dispose();
@@ -306,11 +330,43 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
             decoration: const InputDecoration(labelText: 'Name'),
           ),
           const SizedBox(height: 12),
-          TextField(
-            key: const ValueKey('medication-dose'),
-            controller: _doseController,
-            decoration: const InputDecoration(labelText: 'Dose'),
-          ),
+          if (_usesLegacyDose)
+            TextField(
+              key: const ValueKey('medication-dose'),
+              controller: _doseController,
+              decoration: const InputDecoration(labelText: 'Dose'),
+            )
+          else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('medication-dose-amount'),
+                    controller: _doseAmountController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: const InputDecoration(labelText: 'Amount'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    key: const ValueKey('medication-dose-unit'),
+                    initialValue: _doseUnit,
+                    decoration: const InputDecoration(labelText: 'Unit'),
+                    items: [
+                      for (final unit in _doseUnits)
+                        DropdownMenuItem(value: unit, child: Text(unit)),
+                    ],
+                    onChanged: (unit) {
+                      if (unit != null) setState(() => _doseUnit = unit);
+                    },
+                  ),
+                ),
+              ],
+            ),
           const SizedBox(height: 20),
           SegmentedButton<_ScheduleType>(
             key: const ValueKey('medication-schedule-type'),
@@ -389,15 +445,15 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
       ),
     };
     final original = widget.medication;
-    final medication = Medication(
-      id: original?.id,
-      name: _nameController.text.trim(),
-      dose: _doseController.text.trim(),
-      schedule: schedule,
-      active: original?.active ?? true,
-      notes: original?.notes,
-    );
     try {
+      final medication = Medication(
+        id: original?.id,
+        name: _nameController.text.trim(),
+        dose: _dose(),
+        schedule: schedule,
+        active: original?.active ?? true,
+        notes: original?.notes,
+      );
       if (original == null) {
         await widget.repository.insert(medication);
       } else {
@@ -408,6 +464,35 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
       if (mounted) showValidationError(context, error);
     }
   }
+
+  String _dose() {
+    if (_usesLegacyDose) return _doseController.text;
+    final amount = _doseAmountController.text.trim();
+    if (amount.isEmpty) throw ArgumentError('Dose amount is required.');
+    final value = double.tryParse(amount);
+    if (!RegExp(r'^(?:\d+(?:\.\d+)?|\.\d+)$').hasMatch(amount) ||
+        value == null ||
+        !value.isFinite ||
+        value <= 0) {
+      throw ArgumentError('Dose amount must be a positive number.');
+    }
+    return '$amount $_doseUnit';
+  }
+}
+
+class _DoseParts {
+  const _DoseParts({required this.amount, required this.unit});
+
+  final String amount;
+  final String unit;
+}
+
+_DoseParts? _parseDose(String dose) {
+  final match = RegExp(
+    r'^(\d+(?:\.\d+)?|\.\d+) (mg|micrograms|g|ml|tablets|capsules|pumps|sprays|patches)$',
+  ).firstMatch(dose);
+  if (match == null) return null;
+  return _DoseParts(amount: match.group(1)!, unit: match.group(2)!);
 }
 
 class _RequiredDateTile extends StatelessWidget {

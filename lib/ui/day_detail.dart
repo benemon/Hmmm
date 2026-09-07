@@ -197,11 +197,22 @@ class _DayPage extends StatelessWidget {
           const SizedBox(height: 20),
           Text(
             closedPeriod != null
-                ? 'Period recorded'
+                ? 'Period recorded · ${formatDate(closedPeriod.start)} – '
+                      '${formatDate(closedPeriod.end!)}'
                 : isInOpenPeriod
-                ? 'Period ongoing'
+                ? 'Period ongoing · started ${formatDate(openPeriod.start)}'
                 : 'No period recorded',
           ),
+          if (closedPeriod != null || isInOpenPeriod)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                key: ValueKey('period-delete-${dateToIso(date)}'),
+                onPressed: () =>
+                    _deletePeriod(context, closedPeriod ?? openPeriod!),
+                child: const Text('Delete record'),
+              ),
+            ),
           if (closedPeriod == null &&
               openPeriod == null &&
               !date.isAfter(today)) ...[
@@ -255,6 +266,31 @@ class _DayPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _deletePeriod(BuildContext context, Period period) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete period record?'),
+        content: Text(
+          '${formatDate(period.start)} – '
+          '${period.end == null ? 'ongoing' : formatDate(period.end!)}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('confirm-delete-period'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await periodRepository.delete(period.id!);
   }
 
   Future<void> _startPeriod(BuildContext context) async {

@@ -62,7 +62,7 @@ void main() {
     await _pumpFrames(tester);
 
     expect(find.byKey(const ValueKey('day-detail-2026-06-10')), findsOneWidget);
-    expect(find.text('Period recorded'), findsWidgets);
+    expect(find.textContaining('Period recorded'), findsWidgets);
   });
 
   testWidgets('calendar keeps stopped medication history visible', (
@@ -167,6 +167,34 @@ void main() {
     expect(saved.end, DateTime(2026, 6, 10));
   });
 
+  testWidgets('erroneous period is deletable from the day sheet', (
+    tester,
+  ) async {
+    await periods.insert(
+      Period(start: DateTime(2026, 6, 8), end: DateTime(2026, 6, 11)),
+      today: today,
+    );
+    await _pumpApp(
+      tester,
+      periods,
+      medications,
+      symptoms,
+      settings,
+      database,
+      today,
+    );
+    await tester.tap(find.byKey(const ValueKey('day-2026-06-10')));
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byKey(const ValueKey('period-delete-2026-06-10')));
+    await _pumpFrames(tester);
+    expect(find.text('Delete period record?'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('confirm-delete-period')));
+    await _pumpFrames(tester);
+
+    expect(await periods.listPeriods(), isEmpty);
+  });
+
   testWidgets('overlapping period add shows repository validation message', (
     tester,
   ) async {
@@ -199,9 +227,7 @@ void main() {
     );
   });
 
-  testWidgets('medication add and stop flow persists effective end', (
-    tester,
-  ) async {
+  testWidgets('medication dose entry and stop flow persist', (tester) async {
     await periods.insert(
       Period(start: DateTime(2026, 6, 1), end: DateTime(2026, 6, 5)),
       today: today,
@@ -227,14 +253,22 @@ void main() {
       'Progesterone',
     );
     await tester.enterText(
-      find.byKey(const ValueKey('medication-dose')),
-      '200 mg',
+      find.byKey(const ValueKey('medication-dose-amount')),
+      '200',
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('medication-dose-unit')),
+        matching: find.text('mg'),
+      ),
+      findsOneWidget,
     );
     await tester.tap(find.byKey(const ValueKey('save-medication')));
     await _pumpFrames(tester);
 
     final inserted = (await medications.listMedications()).single;
     expect(inserted.active, isTrue);
+    expect(inserted.dose, '200 mg');
 
     await tester.pumpWidget(const SizedBox.shrink());
     await _pumpApp(
@@ -275,6 +309,183 @@ void main() {
       find.textContaining('from cycle day 15, 12 days (stopped 15 Jun 2026)'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('medication with windows can be deleted', (tester) async {
+    await periods.insert(
+      Period(start: DateTime(2026, 6, 1), end: DateTime(2026, 6, 5)),
+      today: today,
+    );
+    final medication = await medications.insert(
+      Medication(
+        name: 'Progesterone',
+        dose: '200 mg',
+        schedule: CyclicalMedicationSchedule(startCycleDay: 1, durationDays: 3),
+        active: true,
+      ),
+    );
+    await _pumpApp(
+      tester,
+      periods,
+      medications,
+      symptoms,
+      settings,
+      database,
+      today,
+    );
+    expect(find.text('Progesterone'), findsOneWidget);
+
+    await tester.tap(find.text('Settings'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Medications'));
+    await _pumpFrames(tester);
+    await tester.tap(
+      find.byKey(ValueKey('medication-actions-${medication.id}')),
+    );
+    await _pumpFrames(tester);
+    expect(find.text('Stop'), findsOneWidget);
+    await tester.tap(find.text('Delete'));
+    await _pumpFrames(tester);
+    expect(
+      find.text(
+        'Delete Progesterone? All its derived windows disappear from the '
+        'calendar and exports.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('confirm-delete-medication')));
+    await _pumpFrames(tester);
+
+    expect(await medications.listMedications(), isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await _pumpApp(
+      tester,
+      periods,
+      medications,
+      symptoms,
+      settings,
+      database,
+      today,
+    );
+    expect(find.text('Progesterone'), findsNothing);
+  });
+
+  testWidgets('symptom types can be added and custom types deleted', (
+    tester,
+  ) async {
+    await _pumpApp(
+      tester,
+      periods,
+      medications,
+      symptoms,
+      settings,
+      database,
+      today,
+    );
+    await tester.tap(find.text('Settings'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Symptom types'));
+    await _pumpFrames(tester);
+
+    final builtinRow = find.byKey(const ValueKey('symptom-type-1'));
+    expect(builtinRow, findsOneWidget);
+    expect(
+      find.descendant(of: builtinRow, matching: find.byType(IconButton)),
+      findsNothing,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('add-symptom-type')));
+    await _pumpFrames(tester);
+    await tester.enterText(
+      find.byKey(const ValueKey('symptom-type-name')),
+      'dizziness',
+    );
+    await tester.tap(find.byKey(const ValueKey('confirm-add-symptom-type')));
+    await _pumpFrames(tester);
+
+    final custom = (await symptoms.listTypes()).last;
+    expect(custom.name, 'dizziness');
+    await symptoms.upsertEntry(
+      SymptomEntry(
+        date: DateTime(2026, 6, 10),
+        typeId: custom.id!,
+        severity: 2,
+      ),
+      today: today,
+    );
+    await symptoms.upsertEntry(
+      SymptomEntry(date: DateTime(2026, 6, 11), typeId: 1, severity: 1),
+      today: today,
+    );
+    await _pumpFrames(tester);
+    final deleteButton = find.byKey(
+      ValueKey('delete-symptom-type-${custom.id}'),
+    );
+    await tester.scrollUntilVisible(
+      deleteButton,
+      100,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.drag(find.byType(ListView).last, const Offset(0, -100));
+    await _pumpFrames(tester);
+    await tester.tap(deleteButton);
+    await _pumpFrames(tester);
+    expect(
+      find.text('Delete dizziness? Its logged entries are removed.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('confirm-delete-symptom-type')));
+    await _pumpFrames(tester);
+
+    expect(
+      (await symptoms.listTypes()).map((type) => type.name),
+      isNot(contains('dizziness')),
+    );
+    final entries = await symptoms.listEntries();
+    expect(entries, hasLength(1));
+    expect(entries.single.typeId, 1);
+  });
+
+  testWidgets('unparseable medication dose keeps the free-text path', (
+    tester,
+  ) async {
+    final medication = await medications.insert(
+      Medication(
+        name: 'Oestrogen',
+        dose: 'two squirts',
+        schedule: ContinuousMedicationSchedule(start: DateTime(2026, 6, 1)),
+        active: true,
+      ),
+    );
+    await _pumpApp(
+      tester,
+      periods,
+      medications,
+      symptoms,
+      settings,
+      database,
+      today,
+    );
+    await tester.tap(find.text('Settings'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Medications'));
+    await _pumpFrames(tester);
+    await tester.tap(find.byKey(ValueKey('medication-${medication.id}')));
+    await _pumpFrames(tester);
+
+    expect(find.byKey(const ValueKey('medication-dose')), findsOneWidget);
+    expect(find.byKey(const ValueKey('medication-dose-amount')), findsNothing);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('medication-dose')))
+          .controller!
+          .text,
+      'two squirts',
+    );
+    await tester.tap(find.byKey(const ValueKey('save-medication')));
+    await _pumpFrames(tester);
+
+    expect((await medications.listMedications()).single.dose, 'two squirts');
   });
 
   testWidgets(
