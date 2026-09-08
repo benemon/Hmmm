@@ -47,6 +47,7 @@ Future<Database> openHmmmDatabase({
             dose TEXT NOT NULL,
             schedule_type TEXT NOT NULL,
             start_cycle_day INTEGER,
+            interval_days INTEGER,
             duration_days INTEGER,
             start_date TEXT,
             end_date TEXT,
@@ -86,7 +87,8 @@ Future<Database> openHmmmDatabase({
             id INTEGER PRIMARY KEY,
             medication_id INTEGER NOT NULL REFERENCES medications(id) ON DELETE CASCADE,
             source_period_start TEXT NOT NULL,
-            kind TEXT NOT NULL CHECK(kind IN ('ended_early','skipped')),
+            kind TEXT NOT NULL CHECK(kind IN ('started_on','ended_early','skipped')),
+            start_date TEXT,
             end_date TEXT,
             UNIQUE(medication_id, source_period_start)
           )

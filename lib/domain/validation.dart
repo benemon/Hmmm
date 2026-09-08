@@ -52,6 +52,13 @@ void validateMedication(Medication medication) {
         'Medication effective end must be on or after its start.',
       );
     }
+  } else if (schedule is FixedIntervalMedicationSchedule) {
+    if (schedule.intervalDays < 1) {
+      throw ArgumentError('Medication interval must be at least 1 day.');
+    }
+    if (schedule.durationDays < 1) {
+      throw ArgumentError('Medication duration must be at least 1 day.');
+    }
   } else if (schedule is ContinuousMedicationSchedule &&
       schedule.end != null &&
       schedule.end!.isBefore(schedule.start)) {

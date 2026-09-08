@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import '../data/period_repository.dart';
 import '../domain/cycle_lengths.dart';
 import '../domain/dates.dart';
 import '../domain/models.dart';
+import 'empty_state.dart';
 import 'feedback.dart';
 import 'format.dart';
 import 'theme.dart';
@@ -36,11 +38,15 @@ class PeriodRecordsScreen extends StatelessWidget {
                     today: today,
                     onEdit: (period) => _editPeriod(context, period),
                   ),
-            floatingActionButton: FloatingActionButton(
+            floatingActionButton: FloatingActionButton.extended(
               key: const ValueKey('add-period'),
               tooltip: 'Add period',
               onPressed: () => _editPeriod(context, null),
-              child: const Icon(Icons.add),
+              icon: const Icon(Icons.add),
+              label: const Text('Add record'),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(Dim.radiusControl),
+              ),
             ),
           );
         },
@@ -49,26 +55,40 @@ class PeriodRecordsScreen extends StatelessWidget {
   }
 
   Future<void> _editPeriod(BuildContext context, Period? period) async {
-    final draft = await showDialog<_PeriodDraft>(
-      context: context,
-      builder: (context) => _PeriodDialog(period: period, today: today),
+    await showPeriodRecordEditor(
+      context,
+      repository: repository,
+      today: today,
+      period: period,
     );
-    if (draft == null || !context.mounted) return;
-    try {
-      if (period == null) {
-        await repository.insert(
-          Period(start: draft.start, end: draft.end),
-          today: today,
-        );
-      } else {
-        await repository.update(
-          Period(id: period.id, start: draft.start, end: draft.end),
-          today: today,
-        );
-      }
-    } on ArgumentError catch (error) {
-      if (context.mounted) showValidationError(context, error);
+  }
+}
+
+Future<void> showPeriodRecordEditor(
+  BuildContext context, {
+  required PeriodRepository repository,
+  required DateTime today,
+  Period? period,
+}) async {
+  final draft = await showDialog<_PeriodDraft>(
+    context: context,
+    builder: (context) => _PeriodDialog(period: period, today: today),
+  );
+  if (draft == null || !context.mounted) return;
+  try {
+    if (period == null) {
+      await repository.insert(
+        Period(start: draft.start, end: draft.end),
+        today: today,
+      );
+    } else {
+      await repository.update(
+        Period(id: period.id, start: draft.start, end: draft.end),
+        today: today,
+      );
     }
+  } on ArgumentError catch (error) {
+    if (context.mounted) showValidationError(context, error);
   }
 }
 
@@ -87,7 +107,12 @@ class _PeriodList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (periods.isEmpty) return const SizedBox.shrink();
+    if (periods.isEmpty) {
+      return const RecordEmptyState(
+        count: '0 periods recorded',
+        action: 'Record a period start from any day in the calendar.',
+      );
+    }
     final cycleLengths = cycleLengthsToNext(periods);
     final newestFirst = [
       for (var index = periods.length - 1; index >= 0; index--)
@@ -105,35 +130,92 @@ class _PeriodList extends StatelessWidget {
         return Dismissible(
           key: ValueKey('period-${period.id}'),
           direction: DismissDirection.endToStart,
-          confirmDismiss: (_) => _confirmDelete(context),
+          confirmDismiss: (_) => _confirmDelete(context, period),
           onDismissed: (_) => repository.delete(period.id!),
-          child: ListTile(
-            title: Text(
-              '${formatDate(period.start)} – '
-              '${period.end == null ? 'ongoing' : formatDate(period.end!)}',
+          background: Align(
+            alignment: Alignment.centerRight,
+            child: Container(
+              width: 96,
+              color: Markers.of(context).period,
+              alignment: Alignment.center,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.delete_outline,
+                    color: Theme.of(context).colorScheme.onError,
+                  ),
+                  const SizedBox(width: Dim.s2),
+                  Text(
+                    'Delete',
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: Theme.of(context).colorScheme.onError,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            subtitle: Text(
-              '$duration days'
-              '${record.cycleLength == null ? '' : ' · ${record.cycleLength}-day cycle'}',
-              style: tabularFigures,
-            ),
-            onTap: () => onEdit(period),
-            onLongPress: () async {
-              if (await _confirmDelete(context) && context.mounted) {
-                await repository.delete(period.id!);
-              }
+          ),
+          child: Semantics(
+            customSemanticsActions: {
+              const CustomSemanticsAction(label: 'Delete'): () async {
+                if (await _confirmDelete(context, period) && context.mounted) {
+                  await repository.delete(period.id!);
+                }
+              },
             },
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: Dim.rowMinHeight),
+              child: ListTile(
+                title: Text(
+                  '${formatDate(period.start)} – '
+                  '${period.end == null ? 'open' : formatDate(period.end!)}',
+                  style: HmmmType.of(context).figure,
+                ),
+                subtitle: Text(
+                  period.end == null
+                      ? '$duration days so far'
+                      : '$duration days'
+                            '${record.cycleLength == null ? '' : ' · ${record.cycleLength}-day cycle'}',
+                  style: HmmmType.of(context).figureSmall.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                onTap: () => onEdit(period),
+                onLongPress: () async {
+                  if (await _confirmDelete(context, period) &&
+                      context.mounted) {
+                    await repository.delete(period.id!);
+                  }
+                },
+              ),
+            ),
           ),
         );
       },
     );
   }
 
-  Future<bool> _confirmDelete(BuildContext context) async =>
+  Future<bool> _confirmDelete(BuildContext context, Period period) async =>
       await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Delete period?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${formatDate(period.start)} – '
+                '${period.end == null ? 'open' : formatDate(period.end!)}',
+                style: HmmmType.of(context).figure,
+              ),
+              const SizedBox(height: Dim.s1),
+              const Text(
+                'Derived medication windows from this start are removed too.',
+              ),
+            ],
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -180,15 +262,18 @@ class _PeriodDialogState extends State<_PeriodDialog> {
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Start'),
-            trailing: Text(formatDate(_start), style: tabularFigures),
+            trailing: Text(
+              formatDate(_start),
+              style: HmmmType.of(context).figure,
+            ),
             onTap: _pickStart,
           ),
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('End'),
             trailing: Text(
-              _end == null ? 'ongoing' : formatDate(_end!),
-              style: tabularFigures,
+              _end == null ? 'open' : formatDate(_end!),
+              style: HmmmType.of(context).figure,
             ),
             onTap: _pickEnd,
           ),
@@ -197,7 +282,7 @@ class _PeriodDialogState extends State<_PeriodDialog> {
               alignment: Alignment.centerRight,
               child: TextButton(
                 onPressed: () => setState(() => _end = null),
-                child: const Text('Set ongoing'),
+                child: const Text('Set open'),
               ),
             ),
         ],

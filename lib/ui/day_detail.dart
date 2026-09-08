@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import '../data/medication_repository.dart';
 import '../data/period_repository.dart';
@@ -9,6 +12,7 @@ import '../domain/hrt_window.dart';
 import '../domain/models.dart';
 import 'feedback.dart';
 import 'format.dart';
+import 'marker_band.dart';
 import 'symptom_glyph.dart';
 import 'theme.dart';
 
@@ -33,7 +37,17 @@ class DayDetailSheet extends StatefulWidget {
 }
 
 class _DayDetailSheetState extends State<DayDetailSheet> {
-  static const _initialPage = 10000;
+  static const _historyAnchor = 10000;
+  late final DateTime _initialDate = dateOnly(widget.initialDate);
+  late final bool _initialIsFuture = _initialDate.isAfter(
+    dateOnly(widget.today),
+  );
+  late final int _initialPage = _initialIsFuture
+      ? _historyAnchor + calendarDaysBetween(widget.today, _initialDate)
+      : _historyAnchor;
+  late final int _lastPage = _initialIsFuture
+      ? _initialPage
+      : _initialPage + calendarDaysBetween(_initialDate, widget.today);
   late final PageController _pageController = PageController(
     initialPage: _initialPage,
   );
@@ -58,6 +72,7 @@ class _DayDetailSheetState extends State<DayDetailSheet> {
       medications: medications,
       periods: periods,
       range: DateRange(start: DateTime(1, 1, 1), end: DateTime(9999, 12, 31)),
+      today: widget.today,
     );
     return _DayDetailData(
       periods: periods,
@@ -77,60 +92,107 @@ class _DayDetailSheetState extends State<DayDetailSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      expand: false,
-      minChildSize: 0.45,
-      initialChildSize: 0.82,
-      maxChildSize: 0.95,
-      builder: (context, scrollController) => CustomScrollView(
-        controller: scrollController,
-        slivers: [
-          SliverToBoxAdapter(
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Container(
-                  width: 32,
-                  height: 3,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                    borderRadius: BorderRadius.circular(2),
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      scopesRoute: true,
+      namesRoute: true,
+      explicitChildNodes: true,
+      label: 'Day detail, ${_formatLongDate(_initialDate)}',
+      child: DraggableScrollableSheet(
+        expand: false,
+        minChildSize: 0.50,
+        initialChildSize: 0.85,
+        maxChildSize: 0.96,
+        builder: (context, scrollController) => Container(
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            border: Border(top: BorderSide(color: scheme.outline)),
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(Dim.radiusSheet),
+            ),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: CustomScrollView(
+            controller: scrollController,
+            slivers: [
+              const SliverToBoxAdapter(child: _GrabHandle()),
+              SliverFillRemaining(
+                hasScrollBody: true,
+                child: ListenableBuilder(
+                  listenable: _repositories,
+                  builder: (context, child) => FutureBuilder<_DayDetailData>(
+                    future: _loadData(),
+                    builder: (context, snapshot) {
+                      final data = snapshot.data;
+                      if (data == null) return const SizedBox.shrink();
+                      return PageView.builder(
+                        key: const ValueKey('day-detail-pages'),
+                        controller: _pageController,
+                        physics: const ClampingScrollPhysics(),
+                        itemCount: _lastPage + 1,
+                        onPageChanged: (index) {
+                          SemanticsService.sendAnnouncement(
+                            View.of(context),
+                            _formatLongDate(_dateForPage(index)),
+                            Directionality.of(context),
+                          );
+                        },
+                        itemBuilder: (context, index) => _DayPage(
+                          date: _dateForPage(index),
+                          today: widget.today,
+                          data: data,
+                          onPrevious: index == 0
+                              ? null
+                              : () => _goToPage(index - 1),
+                          onNext: index >= _lastPage
+                              ? null
+                              : () => _goToPage(index + 1),
+                          periodRepository: widget.periodRepository,
+                          medicationRepository: widget.medicationRepository,
+                          symptomRepository: widget.symptomRepository,
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
-            ),
+            ],
           ),
-          SliverFillRemaining(
-            hasScrollBody: true,
-            child: ListenableBuilder(
-              listenable: _repositories,
-              builder: (context, child) => FutureBuilder<_DayDetailData>(
-                future: _loadData(),
-                builder: (context, snapshot) {
-                  final data = snapshot.data;
-                  if (data == null) return const SizedBox.shrink();
-                  return PageView.builder(
-                    controller: _pageController,
-                    itemBuilder: (context, index) => _DayPage(
-                      date: addCalendarDays(
-                        widget.initialDate,
-                        index - _initialPage,
-                      ),
-                      today: widget.today,
-                      data: data,
-                      periodRepository: widget.periodRepository,
-                      medicationRepository: widget.medicationRepository,
-                      symptomRepository: widget.symptomRepository,
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
+
+  DateTime _dateForPage(int index) =>
+      addCalendarDays(_initialDate, index - _initialPage);
+
+  void _goToPage(int index) {
+    _pageController.animateToPage(
+      index,
+      duration: Motion.scaled(context, Motion.dayPage),
+      curve: Motion.curve,
+    );
+  }
+}
+
+class _GrabHandle extends StatelessWidget {
+  const _GrabHandle();
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    key: const ValueKey('day-sheet-grab-handle'),
+    height: Dim.minTarget,
+    child: Center(
+      child: Container(
+        width: Dim.s7,
+        height: Dim.s1,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.outline,
+          borderRadius: BorderRadius.circular(Dim.radiusBandCap),
+        ),
+      ),
+    ),
+  );
 }
 
 class _DayDetailData {
@@ -156,6 +218,8 @@ class _DayPage extends StatelessWidget {
     required this.date,
     required this.today,
     required this.data,
+    required this.onPrevious,
+    required this.onNext,
     required this.periodRepository,
     required this.medicationRepository,
     required this.symptomRepository,
@@ -164,6 +228,8 @@ class _DayPage extends StatelessWidget {
   final DateTime date;
   final DateTime today;
   final _DayDetailData data;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
   final PeriodRepository periodRepository;
   final MedicationRepository medicationRepository;
   final SymptomRepository symptomRepository;
@@ -174,180 +240,297 @@ class _DayPage extends StatelessWidget {
     final openPeriod = data.periods
         .where((period) => period.end == null)
         .firstOrNull;
-    final closedPeriod = data.periods.where((period) {
+    final coveringOpenPeriod =
+        openPeriod != null &&
+            !date.isBefore(openPeriod.start) &&
+            !date.isAfter(today)
+        ? openPeriod
+        : null;
+    final coveringClosedPeriod = data.periods.where((period) {
       final end = period.end;
       return end != null && !date.isBefore(period.start) && !date.isAfter(end);
     }).firstOrNull;
-    final isInOpenPeriod =
-        openPeriod != null &&
-        !date.isBefore(openPeriod.start) &&
-        !date.isAfter(today);
     final entriesByTypeId = {
       for (final entry in data.entries)
         if (entry.date == date) entry.typeId: entry,
     };
-    final coveringMedications =
-        <
-          ({
-            Medication medication,
-            DateTime? sourcePeriodStart,
-            WindowAdjustment? adjustment,
-          })
-        >[];
-    for (final medication in data.medications) {
-      final originalWindows = deriveWindows(
-        medication,
-        data.periods,
-        DateRange(start: date, end: date),
-      );
-      for (final original in originalWindows) {
-        final sourcePeriodStart = original.sourcePeriodStart;
-        final adjustment = sourcePeriodStart == null
-            ? null
-            : data.adjustments
-                  .where(
-                    (candidate) =>
-                        candidate.medicationId == medication.id &&
-                        candidate.sourcePeriodStart == sourcePeriodStart,
-                  )
-                  .firstOrNull;
-        final adjustedCoversDate =
-            data.windowsByMedicationId[medication.id]?.any(
-              (window) =>
-                  window.sourcePeriodStart == sourcePeriodStart &&
-                  !date.isBefore(window.start) &&
-                  !date.isAfter(window.end),
-            ) ??
-            false;
-        if (adjustedCoversDate ||
-            adjustment?.kind == WindowAdjustmentKind.skipped) {
-          coveringMedications.add((
-            medication: medication,
-            sourcePeriodStart: sourcePeriodStart,
-            adjustment: adjustment,
-          ));
+    final courses = _coursesForDate(date, data, today);
+    final activeCourseCount = courses.where((course) => course.active).length;
+    final sortedTypes = [...data.types]
+      ..sort((a, b) {
+        final aEntry = entriesByTypeId[a.id];
+        final bEntry = entriesByTypeId[b.id];
+        if (aEntry != null && bEntry == null) return -1;
+        if (aEntry == null && bEntry != null) return 1;
+        if (aEntry != null && bEntry != null) {
+          final severity = bEntry.severity.compareTo(aEntry.severity);
+          if (severity != 0) return severity;
         }
-      }
-    }
+        return a.id!.compareTo(b.id!);
+      });
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _formatFullDate(date),
+    return Column(
+      children: [
+        _DayHeader(
+          date: date,
+          cycleDay: cycleDay,
+          previousEnabled: onPrevious != null,
+          nextEnabled: onNext != null,
+          onPrevious: onPrevious,
+          onNext: onNext,
+        ),
+        Expanded(
+          child: SingleChildScrollView(
             key: ValueKey('day-detail-${dateToIso(date)}'),
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          if (cycleDay != null) ...[
-            const SizedBox(height: 2),
-            Text('cycle day $cycleDay', style: tabularFigures),
-          ],
-          const SizedBox(height: 20),
-          Text(
-            closedPeriod != null
-                ? 'Period recorded · ${formatDate(closedPeriod.start)} – '
-                      '${formatDate(closedPeriod.end!)}'
-                : isInOpenPeriod
-                ? 'Period ongoing · started ${formatDate(openPeriod.start)}'
-                : 'No period recorded',
-          ),
-          if (closedPeriod != null || isInOpenPeriod)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                key: ValueKey('period-delete-${dateToIso(date)}'),
-                onPressed: () =>
-                    _deletePeriod(context, closedPeriod ?? openPeriod!),
-                child: const Text('Delete record'),
-              ),
-            ),
-          if (closedPeriod == null &&
-              openPeriod == null &&
-              !date.isAfter(today)) ...[
-            const SizedBox(height: 10),
-            FilledButton(
-              key: ValueKey('period-start-${dateToIso(date)}'),
-              onPressed: () => _startPeriod(context),
-              child: const Text('Period started'),
-            ),
-          ] else if (openPeriod != null && isInOpenPeriod) ...[
-            const SizedBox(height: 10),
-            FilledButton(
-              key: ValueKey('period-end-${dateToIso(date)}'),
-              onPressed: () => _endPeriod(context, openPeriod),
-              child: const Text('Period ended'),
-            ),
-          ],
-          if (coveringMedications.isNotEmpty) ...[
-            const SizedBox(height: 22),
-            for (final course in coveringMedications)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                title: Text(
-                  '${course.medication.name}  ${course.medication.dose}'
-                  '${_adjustmentLabel(course.adjustment)}',
+            padding: const EdgeInsets.only(bottom: Dim.s7),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _SheetBlock(
+                  semanticsLabel: 'Period',
+                  label: 'PERIOD',
+                  child: _PeriodBlock(
+                    date: date,
+                    today: today,
+                    periods: data.periods,
+                    openPeriod: openPeriod,
+                    coveringOpenPeriod: coveringOpenPeriod,
+                    coveringClosedPeriod: coveringClosedPeriod,
+                    repository: periodRepository,
+                  ),
                 ),
-                trailing: course.sourcePeriodStart == null
-                    ? null
-                    : PopupMenuButton<_CourseAction>(
-                        key: ValueKey(
-                          'course-actions-${course.medication.id}-'
-                          '${dateToIso(course.sourcePeriodStart!)}',
-                        ),
-                        tooltip: 'Course adjustment',
-                        onSelected: (action) => _adjustCourse(
-                          course.medication.id!,
-                          course.sourcePeriodStart!,
-                          action,
-                        ),
-                        itemBuilder: (context) => [
-                          PopupMenuItem(
-                            value: _CourseAction.endedEarly,
-                            child: Text('Course ended on ${formatDate(date)}'),
-                          ),
-                          const PopupMenuItem(
-                            value: _CourseAction.skipped,
-                            child: Text('Course skipped'),
-                          ),
-                          if (course.adjustment != null)
-                            const PopupMenuItem(
-                              value: _CourseAction.restore,
-                              child: Text('Restore full course'),
-                            ),
-                        ],
-                      ),
-              ),
-          ],
-          const SizedBox(height: 22),
-          Text('Symptoms', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final type in data.types)
-                _SymptomChip(
-                  key: ValueKey('symptom-chip-${dateToIso(date)}-${type.id}'),
-                  type: type,
-                  entry: entriesByTypeId[type.id],
-                  enabled: !date.isAfter(today),
-                  onTap: () =>
-                      _cycleSymptom(context, type, entriesByTypeId[type.id]),
-                  onLongPress: () =>
-                      _editNote(context, type, entriesByTypeId[type.id]),
+                const Divider(height: 1),
+                _SheetBlock(
+                  semanticsLabel: 'Medications',
+                  label:
+                      'MEDICATIONS  $activeCourseCount of '
+                      '${data.medications.length} active today',
+                  child: _MedicationBlock(
+                    date: date,
+                    courses: courses,
+                    medicationCount: data.medications.length,
+                    repository: medicationRepository,
+                  ),
                 ),
-              ActionChip(
-                key: const ValueKey('add-symptom-type'),
-                label: const Text('+ symptom type'),
-                onPressed: () => _addSymptomType(context),
+                const Divider(height: 1),
+                _SheetBlock(
+                  semanticsLabel: 'Symptoms',
+                  label:
+                      'SYMPTOMS  ${entriesByTypeId.length} of '
+                      '${data.types.length} recorded',
+                  child: _SymptomsBlock(
+                    date: date,
+                    today: today,
+                    types: sortedTypes,
+                    entriesByTypeId: entriesByTypeId,
+                    repository: symptomRepository,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DayHeader extends StatelessWidget {
+  const _DayHeader({
+    required this.date,
+    required this.cycleDay,
+    required this.previousEnabled,
+    required this.nextEnabled,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final DateTime date;
+  final int? cycleDay;
+  final bool previousEnabled;
+  final bool nextEnabled;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    explicitChildNodes: true,
+    liveRegion: true,
+    header: true,
+    label:
+        '${_formatLongDate(date)}. ${_weekdays[date.weekday - 1]}'
+        '${cycleDay == null ? '' : '. Cycle day $cycleDay'}',
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: Dim.daySheetHeaderHeight),
+      child: Row(
+        children: [
+          Semantics(
+            label: 'Previous day',
+            button: true,
+            enabled: previousEnabled,
+            child: IconButton(
+              key: const ValueKey('previous-day'),
+              tooltip: 'Previous day',
+              onPressed: onPrevious,
+              icon: const Icon(Icons.chevron_left),
+            ),
+          ),
+          Expanded(
+            child: ExcludeSemantics(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    formatDate(date),
+                    softWrap: false,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  Text(
+                    '${_weekdays[date.weekday - 1]}'
+                    '${cycleDay == null ? '' : ' · cycle day $cycleDay'}',
+                    softWrap: false,
+                    style: HmmmType.of(context).figureSmall.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
+          ),
+          Semantics(
+            label: 'Next day',
+            button: true,
+            enabled: nextEnabled,
+            child: IconButton(
+              key: const ValueKey('next-day'),
+              tooltip: 'Next day',
+              onPressed: onNext,
+              icon: const Icon(Icons.chevron_right),
+            ),
           ),
         ],
       ),
+    ),
+  );
+}
+
+class _SheetBlock extends StatelessWidget {
+  const _SheetBlock({
+    required this.semanticsLabel,
+    required this.label,
+    required this.child,
+  });
+
+  final String semanticsLabel;
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    label: semanticsLabel,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(Dim.s4, Dim.s4, Dim.s4, Dim.s5),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ExcludeSemantics(
+            child: Text(label, style: Theme.of(context).textTheme.labelSmall),
+          ),
+          const SizedBox(height: Dim.s3),
+          child,
+        ],
+      ),
+    ),
+  );
+}
+
+class _PeriodBlock extends StatelessWidget {
+  const _PeriodBlock({
+    required this.date,
+    required this.today,
+    required this.periods,
+    required this.openPeriod,
+    required this.coveringOpenPeriod,
+    required this.coveringClosedPeriod,
+    required this.repository,
+  });
+
+  final DateTime date;
+  final DateTime today;
+  final List<Period> periods;
+  final Period? openPeriod;
+  final Period? coveringOpenPeriod;
+  final Period? coveringClosedPeriod;
+  final PeriodRepository repository;
+
+  @override
+  Widget build(BuildContext context) {
+    final covering = coveringClosedPeriod ?? coveringOpenPeriod;
+    final recordedDays = covering == null
+        ? null
+        : _recordedDayCount(covering, today);
+    final status = coveringClosedPeriod != null
+        ? '${formatDate(coveringClosedPeriod!.start)} – '
+              '${formatDate(coveringClosedPeriod!.end!)}'
+        : coveringOpenPeriod != null
+        ? 'started ${formatDate(coveringOpenPeriod!.start)} · open'
+        : 'none recorded';
+    final facts = coveringClosedPeriod != null
+        ? '$recordedDays recorded '
+              '${recordedDays == 1 ? 'day' : 'days'}, '
+              'end recorded'
+        : coveringOpenPeriod != null
+        ? '$recordedDays recorded '
+              '${recordedDays == 1 ? 'day' : 'days'}, '
+              'no end recorded'
+        : _nearestStartText(date, periods);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(status, style: HmmmType.of(context).figure),
+        if (facts != null) ...[
+          const SizedBox(height: Dim.s1),
+          Text(
+            facts,
+            style: HmmmType.of(context).figureSmall.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+        if (covering != null ||
+            (openPeriod == null && !date.isAfter(today))) ...[
+          const SizedBox(height: Dim.s3),
+          Wrap(
+            spacing: Dim.s2,
+            runSpacing: Dim.s2,
+            children: [
+              if (openPeriod == null &&
+                  coveringClosedPeriod == null &&
+                  !date.isAfter(today))
+                FilledButton(
+                  key: ValueKey('period-start-${dateToIso(date)}'),
+                  onPressed: () => _startPeriod(context),
+                  child: const Text('Period started'),
+                )
+              else if (coveringOpenPeriod != null)
+                FilledButton(
+                  key: ValueKey('period-end-${dateToIso(date)}'),
+                  onPressed: () => _endPeriod(context, coveringOpenPeriod!),
+                  child: const Text('Period ended'),
+                ),
+              if (covering != null)
+                TextButton(
+                  key: ValueKey('period-delete-${dateToIso(date)}'),
+                  onPressed: () => _deletePeriod(context, covering),
+                  child: const Text('Delete record'),
+                ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 
@@ -358,7 +541,9 @@ class _DayPage extends StatelessWidget {
         title: const Text('Delete period record?'),
         content: Text(
           '${formatDate(period.start)} – '
-          '${period.end == null ? 'ongoing' : formatDate(period.end!)}',
+          '${period.end == null ? 'open' : formatDate(period.end!)}\n\n'
+          'Derived medication windows from this start are removed too.',
+          style: HmmmType.of(context).figure,
         ),
         actions: [
           TextButton(
@@ -373,36 +558,12 @@ class _DayPage extends StatelessWidget {
         ],
       ),
     );
-    if (confirmed == true) await periodRepository.delete(period.id!);
-  }
-
-  Future<void> _adjustCourse(
-    int medicationId,
-    DateTime sourcePeriodStart,
-    _CourseAction action,
-  ) async {
-    if (action == _CourseAction.restore) {
-      await medicationRepository.clearAdjustment(
-        medicationId,
-        sourcePeriodStart,
-      );
-      return;
-    }
-    await medicationRepository.setAdjustment(
-      WindowAdjustment(
-        medicationId: medicationId,
-        sourcePeriodStart: sourcePeriodStart,
-        kind: action == _CourseAction.endedEarly
-            ? WindowAdjustmentKind.endedEarly
-            : WindowAdjustmentKind.skipped,
-        endDate: action == _CourseAction.endedEarly ? date : null,
-      ),
-    );
+    if (confirmed == true) await repository.delete(period.id!);
   }
 
   Future<void> _startPeriod(BuildContext context) async {
     try {
-      await periodRepository.insert(Period(start: date), today: today);
+      await repository.insert(Period(start: date), today: today);
     } on ArgumentError catch (error) {
       if (context.mounted) showValidationError(context, error);
     }
@@ -410,13 +571,302 @@ class _DayPage extends StatelessWidget {
 
   Future<void> _endPeriod(BuildContext context, Period period) async {
     try {
-      await periodRepository.update(
+      await repository.update(
         Period(id: period.id, start: period.start, end: date),
         today: today,
       );
     } on ArgumentError catch (error) {
       if (context.mounted) showValidationError(context, error);
     }
+  }
+}
+
+class _MedicationCourse {
+  const _MedicationCourse({
+    required this.medication,
+    required this.window,
+    required this.laneIndex,
+    required this.adjustment,
+    required this.active,
+    required this.previousStart,
+  });
+
+  final Medication medication;
+  final MedicationWindow window;
+  final int laneIndex;
+  final WindowAdjustment? adjustment;
+  final bool active;
+  final DateTime? previousStart;
+}
+
+class _MedicationBlock extends StatelessWidget {
+  const _MedicationBlock({
+    required this.date,
+    required this.courses,
+    required this.medicationCount,
+    required this.repository,
+  });
+
+  final DateTime date;
+  final List<_MedicationCourse> courses;
+  final int medicationCount;
+  final MedicationRepository repository;
+
+  @override
+  Widget build(BuildContext context) {
+    if (courses.isEmpty) {
+      return Text(
+        medicationCount == 0 ? '0 medications configured' : 'none active',
+        style: HmmmType.of(context).figureSmall
+            .copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+      );
+    }
+    return Column(
+      children: [
+        for (final course in courses)
+          _MedicationCourseRow(
+            date: date,
+            course: course,
+            repository: repository,
+          ),
+      ],
+    );
+  }
+}
+
+class _MedicationCourseRow extends StatelessWidget {
+  const _MedicationCourseRow({
+    required this.date,
+    required this.course,
+    required this.repository,
+  });
+
+  final DateTime date;
+  final _MedicationCourse course;
+  final MedicationRepository repository;
+
+  @override
+  Widget build(BuildContext context) {
+    final marker = Markers.of(context).lane(course.laneIndex);
+    final adjustment = course.adjustment;
+    return Semantics(
+      customSemanticsActions: course.window.sourcePeriodStart == null
+          ? const {}
+          : {
+              const CustomSemanticsAction(label: 'Course started…'): () =>
+                  _adjustCourse(context, _CourseAction.startedOn),
+            },
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: Dim.rowMinHeight),
+        child: Row(
+          children: [
+            SizedBox(
+              width: Dim.s5,
+              child: MarkerBand(
+                color: marker.color,
+                height: Dim.laneBandHeight,
+                texture: marker.texture,
+              ),
+            ),
+            const SizedBox(width: Dim.s2),
+            Text(marker.label, style: Theme.of(context).textTheme.labelSmall),
+            const SizedBox(width: Dim.s2),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: Dim.s2,
+                    runSpacing: 0,
+                    children: [
+                      Text(
+                        course.medication.name,
+                        style: HmmmType.of(context).bodyStrong,
+                      ),
+                      Text(
+                        course.medication.dose,
+                        style: HmmmType.of(context).figureSmall,
+                      ),
+                    ],
+                  ),
+                  Text(
+                    _courseDerivation(course),
+                    style: HmmmType.of(context).figureSmall.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (adjustment?.startDate != null)
+                    Text(
+                      'started ${formatDate(adjustment!.startDate!)}',
+                      style: HmmmType.of(context).figureSmall,
+                    ),
+                  if (adjustment?.kind == WindowAdjustmentKind.endedEarly)
+                    Text(
+                      'ended early ${formatDate(adjustment!.endDate!)}',
+                      style: HmmmType.of(context).figureSmall,
+                    ),
+                  if (adjustment?.kind == WindowAdjustmentKind.skipped)
+                    Text('skipped', style: HmmmType.of(context).figureSmall),
+                ],
+              ),
+            ),
+            if (course.window.sourcePeriodStart != null)
+              PopupMenuButton<_CourseAction>(
+                key: ValueKey(
+                  'course-actions-${course.medication.id}-'
+                  '${dateToIso(course.window.sourcePeriodStart!)}',
+                ),
+                tooltip: 'Course adjustment',
+                onSelected: (action) => _adjustCourse(context, action),
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: _CourseAction.startedOn,
+                    child: SizedBox(
+                      height: Dim.minTarget,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('Course started…'),
+                      ),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _CourseAction.endedEarly,
+                    child: SizedBox(
+                      height: Dim.minTarget,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('Course ended ${formatDate(date)}'),
+                      ),
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: _CourseAction.skipped,
+                    child: SizedBox(
+                      height: Dim.minTarget,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('Course skipped'),
+                      ),
+                    ),
+                  ),
+                  if (adjustment != null) ...[
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(
+                      value: _CourseAction.restore,
+                      child: SizedBox(
+                        height: Dim.minTarget,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text('Restore full course'),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _adjustCourse(BuildContext context, _CourseAction action) async {
+    final source = course.window.sourcePeriodStart!;
+    if (action == _CourseAction.restore) {
+      await repository.clearAdjustment(course.medication.id!, source);
+      return;
+    }
+    final current = course.adjustment;
+    DateTime? startDate = current?.startDate;
+    if (action == _CourseAction.startedOn) {
+      final selected = await showDatePicker(
+        context: context,
+        initialDate: startDate ?? course.window.start,
+        firstDate: DateTime(1, 1, 1),
+        lastDate: DateTime(9999, 12, 31),
+      );
+      if (selected == null) return;
+      startDate = selected;
+    }
+    await repository.setAdjustment(
+      WindowAdjustment(
+        medicationId: course.medication.id!,
+        sourcePeriodStart: source,
+        kind: switch (action) {
+          _CourseAction.startedOn =>
+            current?.kind == WindowAdjustmentKind.endedEarly ||
+                    current?.kind == WindowAdjustmentKind.skipped
+                ? current!.kind
+                : WindowAdjustmentKind.startedOn,
+          _CourseAction.endedEarly => WindowAdjustmentKind.endedEarly,
+          _CourseAction.skipped => WindowAdjustmentKind.skipped,
+          _CourseAction.restore => throw StateError('Restore handled above.'),
+        },
+        startDate: startDate,
+        endDate: action == _CourseAction.endedEarly ? date : current?.endDate,
+      ),
+    );
+  }
+}
+
+class _SymptomsBlock extends StatelessWidget {
+  const _SymptomsBlock({
+    required this.date,
+    required this.today,
+    required this.types,
+    required this.entriesByTypeId,
+    required this.repository,
+  });
+
+  final DateTime date;
+  final DateTime today;
+  final List<SymptomType> types;
+  final Map<int, SymptomEntry> entriesByTypeId;
+  final SymptomRepository repository;
+
+  @override
+  Widget build(BuildContext context) {
+    final oneColumn =
+        MediaQuery.textScalerOf(context).scale(1) >= Dim.singleColumnTextScale;
+    final chipHeight = math.max(
+      Dim.minTarget,
+      MediaQuery.textScalerOf(context).scale(22) + Dim.s6,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: types.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: oneColumn ? 1 : 2,
+            crossAxisSpacing: Dim.s2,
+            mainAxisSpacing: Dim.s2,
+            mainAxisExtent: chipHeight,
+          ),
+          itemBuilder: (context, index) {
+            final type = types[index];
+            final entry = entriesByTypeId[type.id];
+            return _SeverityChip(
+              key: ValueKey('symptom-chip-${dateToIso(date)}-${type.id}'),
+              type: type,
+              entry: entry,
+              enabled: !date.isAfter(today),
+              onTap: () => _cycleSymptom(context, type, entry),
+              onLongPress: () => _editNote(context, type, entry),
+            );
+          },
+        ),
+        const SizedBox(height: Dim.s3),
+        OutlinedButton(
+          key: const ValueKey('add-symptom-type'),
+          onPressed: () => _addSymptomType(context),
+          child: const Text('Add symptom type'),
+        ),
+      ],
+    );
   }
 
   Future<void> _cycleSymptom(
@@ -425,7 +875,7 @@ class _DayPage extends StatelessWidget {
     SymptomEntry? entry,
   ) async {
     try {
-      await symptomRepository.upsertEntry(
+      await repository.upsertEntry(
         SymptomEntry(
           date: date,
           typeId: type.id!,
@@ -470,7 +920,7 @@ class _DayPage extends StatelessWidget {
     controller.dispose();
     if (note == null || !context.mounted) return;
     try {
-      await symptomRepository.upsertEntry(
+      await repository.upsertEntry(
         SymptomEntry(
           date: date,
           typeId: type.id!,
@@ -510,26 +960,15 @@ class _DayPage extends StatelessWidget {
     controller.dispose();
     if (name == null || !context.mounted) return;
     try {
-      await symptomRepository.insertType(
-        SymptomType(name: name, builtin: false),
-      );
+      await repository.insertType(SymptomType(name: name, builtin: false));
     } on ArgumentError catch (error) {
       if (context.mounted) showValidationError(context, error);
     }
   }
 }
 
-enum _CourseAction { endedEarly, skipped, restore }
-
-String _adjustmentLabel(WindowAdjustment? adjustment) {
-  if (adjustment == null) return '';
-  return adjustment.kind == WindowAdjustmentKind.skipped
-      ? ' · skipped'
-      : ' · ended ${formatDate(adjustment.endDate!)}';
-}
-
-class _SymptomChip extends StatelessWidget {
-  const _SymptomChip({
+class _SeverityChip extends StatelessWidget {
+  const _SeverityChip({
     super.key,
     required this.type,
     required this.entry,
@@ -548,43 +987,266 @@ class _SymptomChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final severity = entry?.severity ?? 0;
-    return Material(
-      color: scheme.surface,
-      shape: StadiumBorder(side: BorderSide(color: scheme.outlineVariant)),
+    final recorded = severity > 0;
+    final border = recorded ? scheme.onSurface : scheme.outline;
+    final hint = [
+      if (entry?.note != null) 'note recorded',
+      'double tap to increase severity, long press to edit note',
+    ].join('. ');
+    final content = AnimatedContainer(
+      duration: Motion.scaled(context, Motion.state),
+      curve: Motion.curve,
+      constraints: const BoxConstraints(minHeight: Dim.minTarget),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(Dim.radiusControl),
+        border: enabled
+            ? Border.all(color: border, width: recorded ? 1.5 : 1)
+            : null,
+      ),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: enabled ? onTap : null,
-        onLongPress: enabled ? onLongPress : null,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SymptomGlyphMark(typeId: type.id!, size: 13),
-              const SizedBox(width: 6),
-              Text(type.name),
-              const SizedBox(width: 8),
-              for (var segment = 1; segment <= 3; segment++) ...[
-                Container(
-                  width: 8,
-                  height: 3,
-                  color: segment <= severity
-                      ? scheme.onSurface
-                      : scheme.outlineVariant,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          onLongPress: enabled ? onLongPress : null,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 12, 0),
+            child: Row(
+              children: [
+                SymptomGlyphMark(typeId: type.id!, size: Dim.glyphSizeChip),
+                const SizedBox(width: Dim.s2),
+                Expanded(
+                  child: Text(
+                    '${type.name}${entry?.note == null ? '' : '*'}',
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
                 ),
-                if (segment < 3) const SizedBox(width: 2),
+                const SizedBox(width: Dim.s2),
+                Text(
+                  enabled ? '$severity/3' : 'future',
+                  style: HmmmType.of(context).figureSmall.copyWith(
+                    color: recorded && enabled
+                        ? scheme.onSurface
+                        : scheme.onSurfaceVariant,
+                    fontWeight: recorded && enabled
+                        ? FontWeight.w500
+                        : FontWeight.w400,
+                  ),
+                ),
+                if (enabled) ...[
+                  const SizedBox(width: Dim.s2),
+                  for (var segment = 1; segment <= 3; segment++) ...[
+                    AnimatedContainer(
+                      duration: Motion.scaled(context, Motion.state),
+                      curve: Motion.curve,
+                      width: Dim.s2,
+                      height: Dim.s1,
+                      decoration: BoxDecoration(
+                        color: segment <= severity ? scheme.onSurface : null,
+                        border: segment <= severity
+                            ? null
+                            : Border.all(color: border),
+                      ),
+                    ),
+                    if (segment < 3) const SizedBox(width: 2),
+                  ],
+                ],
               ],
-            ],
+            ),
           ),
+        ),
+      ),
+    );
+    return Semantics(
+      enabled: enabled,
+      button: true,
+      label: type.name,
+      value: enabled ? '$severity of 3' : 'future',
+      hint: enabled ? hint : null,
+      child: ExcludeSemantics(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: Dim.minTarget),
+          child: enabled
+              ? content
+              : CustomPaint(
+                  foregroundPainter: _DashedRoundedBorderPainter(
+                    color: scheme.outline,
+                  ),
+                  child: content,
+                ),
         ),
       ),
     );
   }
 }
 
-String _formatFullDate(DateTime date) =>
-    '${_weekdays[date.weekday - 1]} ${date.day} '
-    '${monthsFull[date.month - 1]} ${date.year}';
+class _DashedRoundedBorderPainter extends CustomPainter {
+  const _DashedRoundedBorderPainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          Offset.zero & size,
+          const Radius.circular(Dim.radiusControl),
+        ),
+      );
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    for (final metric in path.computeMetrics()) {
+      for (var distance = 0.0; distance < metric.length; distance += 7) {
+        canvas.drawPath(
+          metric.extractPath(distance, (distance + 4).clamp(0, metric.length)),
+          paint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedRoundedBorderPainter oldDelegate) =>
+      color != oldDelegate.color;
+}
+
+enum _CourseAction { startedOn, endedEarly, skipped, restore }
+
+List<_MedicationCourse> _coursesForDate(
+  DateTime date,
+  _DayDetailData data,
+  DateTime today,
+) {
+  final lanes = laneAssignments([
+    for (final medication in data.medications)
+      if (medicationHasDerivableWindows(medication, data.periods, today: today))
+        medication,
+  ]);
+  final courses = <_MedicationCourse>[];
+  final fullRange = DateRange(
+    start: DateTime(1, 1, 1),
+    end: DateTime(9999, 12, 31),
+  );
+  for (final medication in data.medications) {
+    final lane = lanes[medication.id];
+    if (lane == null) continue;
+    final unadjustedWindows = deriveWindows(
+      medication,
+      data.periods,
+      fullRange,
+      today: today,
+    );
+    for (final window in unadjustedWindows) {
+      final source = window.sourcePeriodStart;
+      final adjustment = source == null
+          ? null
+          : data.adjustments
+                .where(
+                  (candidate) =>
+                      candidate.medicationId == medication.id &&
+                      candidate.sourcePeriodStart == source,
+                )
+                .firstOrNull;
+      final active =
+          data.windowsByMedicationId[medication.id]?.any(
+            (adjusted) =>
+                adjusted.sourcePeriodStart == source &&
+                !date.isBefore(adjusted.start) &&
+                !date.isAfter(adjusted.end),
+          ) ??
+          false;
+      final withinUnadjusted =
+          !date.isBefore(window.start) && !date.isAfter(window.end);
+      if (active ||
+          (withinUnadjusted &&
+              adjustment?.kind == WindowAdjustmentKind.skipped)) {
+        courses.add(
+          _MedicationCourse(
+            medication: medication,
+            window: window,
+            laneIndex: lane,
+            adjustment: adjustment,
+            active: active,
+            previousStart: source == null
+                ? null
+                : previousAdjustedCourseStart(
+                    medicationId: medication.id!,
+                    sourcePeriodStart: source,
+                    unadjustedWindows: unadjustedWindows,
+                    adjustments: data.adjustments,
+                  ),
+          ),
+        );
+      }
+    }
+  }
+  return courses;
+}
+
+String _courseDerivation(_MedicationCourse course) {
+  final schedule = course.medication.schedule;
+  if (schedule is CyclicalMedicationSchedule) {
+    final lastDay = schedule.startCycleDay + schedule.durationDays - 1;
+    final previousStart = course.previousStart;
+    final spacing = previousStart == null
+        ? ''
+        : ' · ${calendarDaysBetween(previousStart, course.adjustment?.startDate ?? course.window.start)} '
+              'days since last course started';
+    return 'day ${schedule.startCycleDay}–$lastDay of the '
+        '${_formatDayMonth(course.window.sourcePeriodStart!)} cycle · '
+        'starts ${_formatDayMonth(course.window.start)}$spacing';
+  }
+  if (schedule is FixedIntervalMedicationSchedule) {
+    final courseNumber =
+        calendarDaysBetween(
+              schedule.anchor,
+              course.window.sourcePeriodStart!,
+            ) ~/
+            schedule.intervalDays +
+        1;
+    final previousStart = course.previousStart;
+    final spacing = previousStart == null
+        ? ''
+        : ' · ${calendarDaysBetween(previousStart, course.adjustment?.startDate ?? course.window.start)} '
+              'days since last course started';
+    return 'course $courseNumber · started ${formatDate(course.window.start)} '
+        'by interval$spacing';
+  }
+  final continuous = schedule as ContinuousMedicationSchedule;
+  return continuous.end == null
+      ? 'continuous since ${formatDate(continuous.start)}'
+      : 'continuous ${formatDate(continuous.start)} – '
+            '${formatDate(continuous.end!)}';
+}
+
+int _recordedDayCount(Period period, DateTime today) =>
+    calendarDaysBetween(period.start, period.end ?? today) + 1;
+
+String? _nearestStartText(DateTime date, List<Period> periods) {
+  if (periods.isEmpty) return null;
+  var nearest = periods.first.start;
+  var distance = calendarDaysBetween(date, nearest).abs();
+  for (final period in periods.skip(1)) {
+    final candidateDistance = calendarDaysBetween(date, period.start).abs();
+    if (candidateDistance < distance) {
+      nearest = period.start;
+      distance = candidateDistance;
+    }
+  }
+  final direction = nearest.isBefore(date) ? 'before' : 'after';
+  return 'nearest start ${formatDate(nearest)} · $distance '
+      '${distance == 1 ? 'day' : 'days'} $direction';
+}
+
+String _formatLongDate(DateTime date) =>
+    '${date.day} ${monthsFull[date.month - 1]} ${date.year}';
+
+String _formatDayMonth(DateTime date) =>
+    '${date.day} ${monthsShort[date.month - 1]}';
 
 const _weekdays = [
   'Monday',

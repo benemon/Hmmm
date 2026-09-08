@@ -27,6 +27,8 @@ class MedicationWindow {
 
   final DateTime start;
   final DateTime end;
+
+  /// Recorded period start or unadjusted anchor-derived course start.
   final DateTime? sourcePeriodStart;
 
   @override
@@ -43,20 +45,25 @@ class MedicationWindow {
 List<MedicationWindow> deriveWindows(
   Medication medication,
   List<Period> periods,
-  DateRange range,
-) {
-  return _clipWindows(_deriveWindows(medication, periods, range), range);
+  DateRange range, {
+  required DateTime today,
+}) {
+  return _clipWindows(
+    _deriveWindows(medication, periods, range, today: today),
+    range,
+  );
 }
 
 List<MedicationWindow> deriveAdjustedWindows(
   Medication medication,
   List<Period> periods,
   DateRange range,
-  List<WindowAdjustment> adjustments,
-) => _clipWindows(
+  List<WindowAdjustment> adjustments, {
+  required DateTime today,
+}) => _clipWindows(
   applyWindowAdjustments(
     medicationId: medication.id!,
-    windows: _deriveWindows(medication, periods, range),
+    windows: _deriveWindows(medication, periods, range, today: today),
     adjustments: adjustments,
   ),
   range,
@@ -85,15 +92,21 @@ List<MedicationWindow> applyWindowAdjustments({
       continue;
     }
     if (adjustment.kind == WindowAdjustmentKind.skipped) continue;
-    final adjustedEnd = adjustment.endDate!;
+    final durationDays = calendarDaysBetween(window.start, window.end) + 1;
+    final adjustedStart = adjustment.startDate ?? window.start;
+    final fullEnd = addCalendarDays(adjustedStart, durationDays - 1);
+    final recordedEnd = adjustment.endDate;
+    final adjustedEnd = recordedEnd == null
+        ? fullEnd
+        : recordedEnd.isBefore(adjustedStart)
+        ? adjustedStart
+        : recordedEnd.isAfter(fullEnd)
+        ? fullEnd
+        : recordedEnd;
     adjusted.add(
       MedicationWindow(
-        start: window.start,
-        end: adjustedEnd.isBefore(window.start)
-            ? window.start
-            : adjustedEnd.isAfter(window.end)
-            ? window.end
-            : adjustedEnd,
+        start: adjustedStart,
+        end: adjustedEnd,
         sourcePeriodStart: sourcePeriodStart,
       ),
     );
@@ -104,12 +117,36 @@ List<MedicationWindow> applyWindowAdjustments({
 List<MedicationWindow> _deriveWindows(
   Medication medication,
   List<Period> periods,
-  DateRange range,
-) {
+  DateRange range, {
+  required DateTime today,
+}) {
   final schedule = medication.schedule;
   if (schedule is ContinuousMedicationSchedule) {
     final end = schedule.end ?? range.end;
     return [MedicationWindow(start: schedule.start, end: end)];
+  }
+
+  if (schedule is FixedIntervalMedicationSchedule) {
+    final horizon = addCalendarDays(dateOnly(today), schedule.intervalDays);
+    final windows = <MedicationWindow>[];
+    for (
+      var start = schedule.anchor;
+      !start.isAfter(horizon);
+      start = addCalendarDays(start, schedule.intervalDays)
+    ) {
+      if (schedule.effectiveEnd != null &&
+          start.isAfter(schedule.effectiveEnd!)) {
+        break;
+      }
+      windows.add(
+        MedicationWindow(
+          start: start,
+          end: addCalendarDays(start, schedule.durationDays - 1),
+          sourcePeriodStart: start,
+        ),
+      );
+    }
+    return windows;
   }
 
   final cyclical = schedule as CyclicalMedicationSchedule;
@@ -152,14 +189,54 @@ bool cyclicalScheduleAppliesToPeriodStart(
 
 bool medicationHasDerivableWindows(
   Medication medication,
-  List<Period> periods,
-) {
+  List<Period> periods, {
+  required DateTime today,
+}) {
   final schedule = medication.schedule;
   if (schedule is ContinuousMedicationSchedule) return true;
+  if (schedule is FixedIntervalMedicationSchedule) {
+    return !schedule.anchor.isAfter(
+          addCalendarDays(dateOnly(today), schedule.intervalDays),
+        ) &&
+        (schedule.effectiveEnd == null ||
+            !schedule.anchor.isAfter(schedule.effectiveEnd!));
+  }
   final cyclical = schedule as CyclicalMedicationSchedule;
   return periods.any(
     (period) => cyclicalScheduleAppliesToPeriodStart(cyclical, period.start),
   );
+}
+
+DateTime? previousAdjustedCourseStart({
+  required int medicationId,
+  required DateTime sourcePeriodStart,
+  required List<MedicationWindow> unadjustedWindows,
+  required List<WindowAdjustment> adjustments,
+}) {
+  MedicationWindow? previous;
+  for (final window in unadjustedWindows) {
+    final source = window.sourcePeriodStart;
+    if (source == null || !source.isBefore(sourcePeriodStart)) continue;
+    if (previous == null || source.isAfter(previous.sourcePeriodStart!)) {
+      final adjustment = adjustments
+          .where(
+            (candidate) =>
+                candidate.medicationId == medicationId &&
+                candidate.sourcePeriodStart == source,
+          )
+          .firstOrNull;
+      if (adjustment?.kind != WindowAdjustmentKind.skipped) previous = window;
+    }
+  }
+  if (previous == null) return null;
+  final adjustment = adjustments
+      .where(
+        (candidate) =>
+            candidate.medicationId == medicationId &&
+            candidate.sourcePeriodStart == previous!.sourcePeriodStart,
+      )
+      .firstOrNull;
+  return adjustment?.startDate ?? previous.start;
 }
 
 (DateTime, DateTime)? _clipWindow(

@@ -5,8 +5,10 @@ import '../data/period_repository.dart';
 import '../domain/calendar.dart';
 import '../domain/hrt_window.dart';
 import '../domain/models.dart';
+import 'empty_state.dart';
 import 'feedback.dart';
 import 'format.dart';
+import 'marker_band.dart';
 import 'theme.dart';
 
 class MedicationsScreen extends StatefulWidget {
@@ -52,17 +54,33 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
           final data = snapshot.data;
           final laneById = laneAssignments([
             for (final medication in data?.medications ?? const <Medication>[])
-              if (medicationHasDerivableWindows(medication, data!.periods))
+              if (medicationHasDerivableWindows(
+                medication,
+                data!.periods,
+                today: widget.today,
+              ))
                 medication,
           ]);
           return Scaffold(
-            appBar: AppBar(title: const Text('Medications')),
+            appBar: AppBar(
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Medications'),
+                  if (data != null)
+                    Text(
+                      '${data.medications.length} ${data.medications.length == 1 ? 'medication' : 'medications'}',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                ],
+              ),
+            ),
             body: data == null
                 ? const SizedBox.shrink()
                 : data.medications.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('No medications configured.'),
+                ? const RecordEmptyState(
+                    count: '0 medications',
+                    action: 'Tap Add medication.',
                   )
                 : ListView.separated(
                     itemCount: data.medications.length,
@@ -78,11 +96,15 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
                       );
                     },
                   ),
-            floatingActionButton: FloatingActionButton(
+            floatingActionButton: FloatingActionButton.extended(
               key: const ValueKey('add-medication'),
               tooltip: 'Add medication',
               onPressed: () => _openForm(null),
-              child: const Icon(Icons.add),
+              icon: const Icon(Icons.add),
+              label: const Text('Add medication'),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(Dim.radiusControl),
+              ),
             ),
           );
         },
@@ -131,15 +153,32 @@ class _MedicationTile extends StatelessWidget {
     return ListTile(
       key: ValueKey('medication-${medication.id}'),
       leading: lane == null
-          ? const SizedBox(width: 20)
-          : Container(
-              width: 20,
-              height: 5,
-              color: Markers.of(context).lane(lane),
+          ? null
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 20,
+                  child: MarkerBand(
+                    color: Markers.of(context).lane(lane).color,
+                    height: Dim.laneBandHeight,
+                    texture: Markers.of(context).lane(lane).texture,
+                  ),
+                ),
+                const SizedBox(width: Dim.s1),
+                Text(
+                  Markers.of(context).lane(lane).label,
+                  style: Theme.of(context).textTheme.labelSmall
+                      ?.copyWith(letterSpacing: 0),
+                ),
+              ],
             ),
-      title: Text(medication.name),
-      subtitle: Text('${medication.dose}\n${_scheduleSummary(medication)}'),
-      isThreeLine: true,
+      title: Text(medication.name, style: HmmmType.of(context).bodyStrong),
+      subtitle: Text(
+        _medicationFacts(medication),
+        style: HmmmType.of(context).figureSmall
+            .copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+      ),
       onTap: onEdit,
       trailing: PopupMenuButton<_MedicationAction>(
         key: ValueKey('medication-actions-${medication.id}'),
@@ -150,7 +189,7 @@ class _MedicationTile extends StatelessWidget {
               value: _MedicationAction.resume,
               child: Text('Resume'),
             )
-          else if (lane != null)
+          else
             const PopupMenuItem(
               value: _MedicationAction.stop,
               child: Text('Stop'),
@@ -173,8 +212,15 @@ class _MedicationTile extends StatelessWidget {
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            content: Text(
-              'Stop ${medication.name}? Historical windows are kept.',
+            title: Text('Stop ${medication.name}?'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(medication.name, style: HmmmType.of(context).figure),
+                const SizedBox(height: Dim.s1),
+                const Text('Historical medication windows are kept.'),
+              ],
             ),
             actions: [
               TextButton(
@@ -197,9 +243,17 @@ class _MedicationTile extends StatelessWidget {
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            content: Text(
-              'Delete ${medication.name}? All its derived windows disappear '
-              'from the calendar and exports.',
+            title: Text('Delete ${medication.name}?'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(medication.name, style: HmmmType.of(context).figure),
+                const SizedBox(height: Dim.s1),
+                const Text(
+                  'All its derived windows are removed from the calendar and exports.',
+                ),
+              ],
             ),
             actions: [
               TextButton(
@@ -242,7 +296,7 @@ class _MedicationFormScreen extends StatefulWidget {
   State<_MedicationFormScreen> createState() => _MedicationFormScreenState();
 }
 
-enum _ScheduleType { cyclical, continuous }
+enum _ScheduleType { cyclical, fixedInterval, continuous }
 
 const _doseUnits = [
   'mg',
@@ -275,20 +329,32 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
     text: _cyclical?.startCycleDay.toString() ?? '15',
   );
   late final TextEditingController _durationController = TextEditingController(
-    text: _cyclical?.durationDays.toString() ?? '12',
+    text:
+        (_cyclical?.durationDays ?? _fixedInterval?.durationDays)?.toString() ??
+        '12',
   );
-  late _ScheduleType _scheduleType =
-      widget.medication?.schedule is ContinuousMedicationSchedule
-      ? _ScheduleType.continuous
-      : _ScheduleType.cyclical;
+  late final TextEditingController _intervalController = TextEditingController(
+    text: _fixedInterval?.intervalDays.toString() ?? '28',
+  );
+  late _ScheduleType _scheduleType = switch (widget.medication?.schedule) {
+    FixedIntervalMedicationSchedule() => _ScheduleType.fixedInterval,
+    ContinuousMedicationSchedule() => _ScheduleType.continuous,
+    _ => _ScheduleType.cyclical,
+  };
   late DateTime? _effectiveStart = _cyclical?.effectiveStart;
   late DateTime? _effectiveEnd = _cyclical?.effectiveEnd;
+  late DateTime _intervalAnchor = _fixedInterval?.anchor ?? widget.today;
   late DateTime _continuousStart = _continuous?.start ?? widget.today;
   late DateTime? _continuousEnd = _continuous?.end;
 
   CyclicalMedicationSchedule? get _cyclical =>
       widget.medication?.schedule is CyclicalMedicationSchedule
       ? widget.medication!.schedule as CyclicalMedicationSchedule
+      : null;
+
+  FixedIntervalMedicationSchedule? get _fixedInterval =>
+      widget.medication?.schedule is FixedIntervalMedicationSchedule
+      ? widget.medication!.schedule as FixedIntervalMedicationSchedule
       : null;
 
   ContinuousMedicationSchedule? get _continuous =>
@@ -303,124 +369,263 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
     _doseAmountController.dispose();
     _cycleDayController.dispose();
     _durationController.dispose();
+    _intervalController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final ink = Theme.of(context).colorScheme.onSurface;
+    final inverse = Theme.of(context).colorScheme.surface;
+    final verticalSchedule = MediaQuery.textScalerOf(context).scale(1) >= 2;
+    final derivation = _derivationLine();
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          widget.medication == null ? 'Add medication' : 'Edit medication',
-        ),
+        title: Text(widget.medication?.name ?? 'Add medication'),
         actions: [
-          TextButton(
-            key: const ValueKey('save-medication'),
-            onPressed: _save,
-            child: const Text('Save'),
+          Padding(
+            padding: const EdgeInsets.only(right: Dim.s2),
+            child: FilledButton(
+              key: const ValueKey('save-medication'),
+              onPressed: _save,
+              child: const Text('Save'),
+            ),
           ),
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(Dim.s4, Dim.s4, Dim.s4, Dim.s7),
         children: [
-          TextField(
-            key: const ValueKey('medication-name'),
-            controller: _nameController,
-            decoration: const InputDecoration(labelText: 'Name'),
+          _LabeledField(
+            label: 'NAME',
+            child: TextField(
+              key: const ValueKey('medication-name'),
+              controller: _nameController,
+              style: HmmmType.of(context).figure,
+              decoration: const InputDecoration(),
+            ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: Dim.s3),
           if (_usesLegacyDose)
-            TextField(
-              key: const ValueKey('medication-dose'),
-              controller: _doseController,
-              decoration: const InputDecoration(labelText: 'Dose'),
+            _LabeledField(
+              label: 'DOSE',
+              child: TextField(
+                key: const ValueKey('medication-dose'),
+                controller: _doseController,
+                style: HmmmType.of(context).figure,
+                decoration: const InputDecoration(),
+              ),
             )
           else
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: TextField(
-                    key: const ValueKey('medication-dose-amount'),
-                    controller: _doseAmountController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final fieldWidth = verticalSchedule
+                    ? constraints.maxWidth
+                    : (constraints.maxWidth - Dim.s3) / 2;
+                return Wrap(
+                  spacing: Dim.s3,
+                  runSpacing: Dim.s3,
+                  children: [
+                    SizedBox(
+                      width: fieldWidth,
+                      child: _LabeledField(
+                        label: 'AMOUNT',
+                        child: TextField(
+                          key: const ValueKey('medication-dose-amount'),
+                          controller: _doseAmountController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          style: HmmmType.of(context).figure,
+                          decoration: const InputDecoration(),
+                        ),
+                      ),
                     ),
-                    decoration: const InputDecoration(labelText: 'Amount'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    key: const ValueKey('medication-dose-unit'),
-                    initialValue: _doseUnit,
-                    decoration: const InputDecoration(labelText: 'Unit'),
-                    items: [
-                      for (final unit in _doseUnits)
-                        DropdownMenuItem(value: unit, child: Text(unit)),
-                    ],
-                    onChanged: (unit) {
-                      if (unit != null) setState(() => _doseUnit = unit);
-                    },
-                  ),
-                ),
-              ],
+                    SizedBox(
+                      width: fieldWidth,
+                      child: _LabeledField(
+                        label: 'UNIT',
+                        child: DropdownButtonFormField<String>(
+                          key: const ValueKey('medication-dose-unit'),
+                          initialValue: _doseUnit,
+                          style: HmmmType.of(context).figure,
+                          decoration: const InputDecoration(),
+                          items: [
+                            for (final unit in _doseUnits)
+                              DropdownMenuItem(value: unit, child: Text(unit)),
+                          ],
+                          onChanged: (unit) {
+                            if (unit != null) setState(() => _doseUnit = unit);
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
-          const SizedBox(height: 20),
-          SegmentedButton<_ScheduleType>(
-            key: const ValueKey('medication-schedule-type'),
-            segments: const [
-              ButtonSegment(
-                value: _ScheduleType.cyclical,
-                label: Text('Cyclical'),
+          const SizedBox(height: Dim.s5),
+          _LabeledField(
+            label: 'SCHEDULE',
+            child: SizedBox(
+              width: double.infinity,
+              height: verticalSchedule ? Dim.minTarget * 3 : null,
+              child: SegmentedButton<_ScheduleType>(
+                key: const ValueKey('medication-schedule-type'),
+                direction: verticalSchedule ? Axis.vertical : Axis.horizontal,
+                expandedInsets: EdgeInsets.zero,
+                segments: const [
+                  ButtonSegment(
+                    value: _ScheduleType.cyclical,
+                    label: Text('Cycle day'),
+                  ),
+                  ButtonSegment(
+                    value: _ScheduleType.fixedInterval,
+                    label: Text('Interval'),
+                  ),
+                  ButtonSegment(
+                    value: _ScheduleType.continuous,
+                    label: Text('Continuous'),
+                  ),
+                ],
+                selected: {_scheduleType},
+                showSelectedIcon: false,
+                style: ButtonStyle(
+                  minimumSize: const WidgetStatePropertyAll(
+                    Size(0, Dim.minTarget),
+                  ),
+                  backgroundColor: WidgetStateProperty.resolveWith(
+                    (states) => states.contains(WidgetState.selected)
+                        ? ink
+                        : Colors.transparent,
+                  ),
+                  foregroundColor: WidgetStateProperty.resolveWith(
+                    (states) =>
+                        states.contains(WidgetState.selected) ? inverse : ink,
+                  ),
+                ),
+                onSelectionChanged: (selected) =>
+                    setState(() => _scheduleType = selected.single),
               ),
-              ButtonSegment(
-                value: _ScheduleType.continuous,
-                label: Text('Continuous'),
-              ),
-            ],
-            selected: {_scheduleType},
-            onSelectionChanged: (selected) =>
-                setState(() => _scheduleType = selected.single),
+            ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: Dim.s2),
+          Text(
+            switch (_scheduleType) {
+              _ScheduleType.cyclical =>
+                'derived from each recorded period start',
+              _ScheduleType.fixedInterval =>
+                'derived from the anchor date at a fixed interval',
+              _ScheduleType.continuous =>
+                'applies continuously between recorded dates',
+            },
+            style: HmmmType.of(context).figureSmall.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: Dim.s1),
+          Semantics(
+            key: const ValueKey('medication-derivation'),
+            label: derivation,
+            child: ExcludeSemantics(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.arrow_forward,
+                    size: MediaQuery.textScalerOf(context).scale(13),
+                  ),
+                  const SizedBox(width: Dim.s1),
+                  Expanded(
+                    child: Text(
+                      derivation.substring(2),
+                      style: HmmmType.of(context).figureSmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: Dim.s4),
           if (_scheduleType == _ScheduleType.cyclical) ...[
-            TextField(
-              key: const ValueKey('medication-cycle-day'),
-              controller: _cycleDayController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Start cycle day'),
+            _LabeledField(
+              label: 'START CYCLE DAY',
+              child: TextField(
+                key: const ValueKey('medication-cycle-day'),
+                controller: _cycleDayController,
+                keyboardType: TextInputType.number,
+                style: HmmmType.of(context).figure,
+                decoration: const InputDecoration(),
+                onChanged: (_) => setState(() {}),
+              ),
             ),
-            const SizedBox(height: 12),
-            TextField(
-              key: const ValueKey('medication-duration'),
-              controller: _durationController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Duration days'),
+            const SizedBox(height: Dim.s3),
+            _LabeledField(
+              label: 'DURATION DAYS',
+              child: TextField(
+                key: const ValueKey('medication-duration'),
+                controller: _durationController,
+                keyboardType: TextInputType.number,
+                style: HmmmType.of(context).figure,
+                decoration: const InputDecoration(),
+                onChanged: (_) => setState(() {}),
+              ),
             ),
-            const SizedBox(height: 8),
-            _OptionalDateTile(
-              label: 'Effective start',
+            const SizedBox(height: Dim.s3),
+            _OptionalDateField(
+              label: 'EFFECTIVE START',
               value: _effectiveStart,
               today: widget.today,
               onChanged: (value) => setState(() => _effectiveStart = value),
             ),
-            _OptionalDateTile(
-              label: 'Effective end',
+            const SizedBox(height: Dim.s3),
+            _OptionalDateField(
+              label: 'EFFECTIVE END',
               value: _effectiveEnd,
               today: widget.today,
               onChanged: (value) => setState(() => _effectiveEnd = value),
             ),
+          ] else if (_scheduleType == _ScheduleType.fixedInterval) ...[
+            _RequiredDateField(
+              label: 'ANCHOR DATE',
+              value: _intervalAnchor,
+              today: widget.today,
+              onChanged: (value) => setState(() => _intervalAnchor = value),
+            ),
+            const SizedBox(height: Dim.s3),
+            _LabeledField(
+              label: 'EVERY (DAYS)',
+              child: TextField(
+                key: const ValueKey('medication-interval-days'),
+                controller: _intervalController,
+                keyboardType: TextInputType.number,
+                style: HmmmType.of(context).figure,
+                decoration: const InputDecoration(),
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+            const SizedBox(height: Dim.s3),
+            _LabeledField(
+              label: 'DURATION (DAYS)',
+              child: TextField(
+                key: const ValueKey('medication-interval-duration'),
+                controller: _durationController,
+                keyboardType: TextInputType.number,
+                style: HmmmType.of(context).figure,
+                decoration: const InputDecoration(),
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
           ] else ...[
-            _RequiredDateTile(
-              label: 'Start',
+            _RequiredDateField(
+              label: 'START',
               value: _continuousStart,
               today: widget.today,
               onChanged: (value) => setState(() => _continuousStart = value),
             ),
-            _OptionalDateTile(
-              label: 'End',
+            const SizedBox(height: Dim.s3),
+            _OptionalDateField(
+              label: 'END',
               value: _continuousEnd,
               today: widget.today,
               onChanged: (value) => setState(() => _continuousEnd = value),
@@ -431,6 +636,32 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
     );
   }
 
+  String _derivationLine() {
+    if (_scheduleType == _ScheduleType.continuous) {
+      return '→ continuous since ${formatDate(_continuousStart)}'
+          '${_continuousEnd == null ? '' : ' to ${formatDate(_continuousEnd!)}'}';
+    }
+    if (_scheduleType == _ScheduleType.fixedInterval) {
+      final interval = int.tryParse(_intervalController.text);
+      final duration = int.tryParse(_durationController.text);
+      if (interval == null ||
+          duration == null ||
+          interval < 1 ||
+          duration < 1) {
+        return '→ enter an interval and duration';
+      }
+      return '→ $duration days every $interval days from '
+          '${formatDate(_intervalAnchor)}';
+    }
+    final start = int.tryParse(_cycleDayController.text);
+    final duration = int.tryParse(_durationController.text);
+    if (start == null || duration == null || start < 1 || duration < 1) {
+      return '→ enter a cycle day and duration';
+    }
+    return '→ cycle day $start to ${start + duration - 1}, '
+        '$duration days per recorded cycle';
+  }
+
   Future<void> _save() async {
     final schedule = switch (_scheduleType) {
       _ScheduleType.cyclical => CyclicalMedicationSchedule(
@@ -438,6 +669,12 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
         durationDays: int.tryParse(_durationController.text) ?? 0,
         effectiveStart: _effectiveStart,
         effectiveEnd: _effectiveEnd,
+      ),
+      _ScheduleType.fixedInterval => FixedIntervalMedicationSchedule(
+        anchor: _intervalAnchor,
+        intervalDays: int.tryParse(_intervalController.text) ?? 0,
+        durationDays: int.tryParse(_durationController.text) ?? 0,
+        effectiveEnd: _fixedInterval?.effectiveEnd,
       ),
       _ScheduleType.continuous => ContinuousMedicationSchedule(
         start: _continuousStart,
@@ -495,8 +732,27 @@ _DoseParts? _parseDose(String dose) {
   return _DoseParts(amount: match.group(1)!, unit: match.group(2)!);
 }
 
-class _RequiredDateTile extends StatelessWidget {
-  const _RequiredDateTile({
+class _LabeledField extends StatelessWidget {
+  const _LabeledField({required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.labelSmall),
+        const SizedBox(height: Dim.s1),
+        child,
+      ],
+    );
+  }
+}
+
+class _RequiredDateField extends StatelessWidget {
+  const _RequiredDateField({
     required this.label,
     required this.value,
     required this.today,
@@ -510,20 +766,21 @@ class _RequiredDateTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(label),
-      trailing: Text(formatDate(value), style: tabularFigures),
-      onTap: () async {
-        final selected = await _pickDate(context, value, today);
-        if (selected != null) onChanged(selected);
-      },
+    return _LabeledField(
+      label: label,
+      child: _DateControl(
+        value: formatDate(value),
+        onTap: () async {
+          final selected = await _pickDate(context, value, today);
+          if (selected != null) onChanged(selected);
+        },
+      ),
     );
   }
 }
 
-class _OptionalDateTile extends StatelessWidget {
-  const _OptionalDateTile({
+class _OptionalDateField extends StatelessWidget {
+  const _OptionalDateField({
     required this.label,
     required this.value,
     required this.today,
@@ -537,28 +794,57 @@ class _OptionalDateTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(label),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            value == null ? 'not set' : formatDate(value!),
-            style: tabularFigures,
-          ),
-          if (value != null)
-            IconButton(
-              tooltip: 'Clear $label',
-              onPressed: () => onChanged(null),
-              icon: const Icon(Icons.close),
-            ),
-        ],
+    return _LabeledField(
+      label: label,
+      child: _DateControl(
+        value: value == null ? 'not set' : formatDate(value!),
+        onTap: () async {
+          final selected = await _pickDate(context, value ?? today, today);
+          if (selected != null) onChanged(selected);
+        },
+        onClear: value == null ? null : () => onChanged(null),
       ),
-      onTap: () async {
-        final selected = await _pickDate(context, value ?? today, today);
-        if (selected != null) onChanged(selected);
-      },
+    );
+  }
+}
+
+class _DateControl extends StatelessWidget {
+  const _DateControl({required this.value, required this.onTap, this.onClear});
+
+  final String value;
+  final VoidCallback onTap;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(Dim.radiusControl),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: Dim.minTarget),
+          padding: EdgeInsets.only(
+            left: Dim.s3,
+            right: onClear == null ? Dim.s3 : 0,
+          ),
+          decoration: BoxDecoration(
+            border: Border.all(color: Theme.of(context).colorScheme.outline),
+            borderRadius: BorderRadius.circular(Dim.radiusControl),
+          ),
+          child: Row(
+            children: [
+              Expanded(child: Text(value, style: HmmmType.of(context).figure)),
+              if (onClear != null)
+                IconButton(
+                  tooltip: 'Clear date',
+                  onPressed: onClear,
+                  icon: const Icon(Icons.close),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -580,17 +866,24 @@ Medication _stoppedMedication(Medication medication, DateTime today) {
     id: medication.id,
     name: medication.name,
     dose: medication.dose,
-    schedule: schedule is CyclicalMedicationSchedule
-        ? CyclicalMedicationSchedule(
-            startCycleDay: schedule.startCycleDay,
-            durationDays: schedule.durationDays,
-            effectiveStart: schedule.effectiveStart,
-            effectiveEnd: today,
-          )
-        : ContinuousMedicationSchedule(
-            start: (schedule as ContinuousMedicationSchedule).start,
-            end: today,
-          ),
+    schedule: switch (schedule) {
+      CyclicalMedicationSchedule() => CyclicalMedicationSchedule(
+        startCycleDay: schedule.startCycleDay,
+        durationDays: schedule.durationDays,
+        effectiveStart: schedule.effectiveStart,
+        effectiveEnd: today,
+      ),
+      FixedIntervalMedicationSchedule() => FixedIntervalMedicationSchedule(
+        anchor: schedule.anchor,
+        intervalDays: schedule.intervalDays,
+        durationDays: schedule.durationDays,
+        effectiveEnd: today,
+      ),
+      ContinuousMedicationSchedule() => ContinuousMedicationSchedule(
+        start: schedule.start,
+        end: today,
+      ),
+    },
     active: false,
     notes: medication.notes,
   );
@@ -602,30 +895,50 @@ Medication _resumedMedication(Medication medication) {
     id: medication.id,
     name: medication.name,
     dose: medication.dose,
-    schedule: schedule is CyclicalMedicationSchedule
-        ? CyclicalMedicationSchedule(
-            startCycleDay: schedule.startCycleDay,
-            durationDays: schedule.durationDays,
-            effectiveStart: schedule.effectiveStart,
-          )
-        : ContinuousMedicationSchedule(
-            start: (schedule as ContinuousMedicationSchedule).start,
-          ),
+    schedule: switch (schedule) {
+      CyclicalMedicationSchedule() => CyclicalMedicationSchedule(
+        startCycleDay: schedule.startCycleDay,
+        durationDays: schedule.durationDays,
+        effectiveStart: schedule.effectiveStart,
+      ),
+      FixedIntervalMedicationSchedule() => FixedIntervalMedicationSchedule(
+        anchor: schedule.anchor,
+        intervalDays: schedule.intervalDays,
+        durationDays: schedule.durationDays,
+      ),
+      ContinuousMedicationSchedule() => ContinuousMedicationSchedule(
+        start: schedule.start,
+      ),
+    },
     active: true,
     notes: medication.notes,
   );
 }
 
-String _scheduleSummary(Medication medication) {
+String _medicationFacts(Medication medication) {
   final schedule = medication.schedule;
+  final facts = [medication.dose];
   if (schedule is CyclicalMedicationSchedule) {
-    return 'from cycle day ${schedule.startCycleDay}, '
-        '${schedule.durationDays} days${_stoppedSuffix(schedule.effectiveEnd)}';
+    facts.add(
+      'cycle day ${schedule.startCycleDay}, ${schedule.durationDays} days',
+    );
+    if (schedule.effectiveEnd != null) {
+      facts.add('(stopped ${formatDate(schedule.effectiveEnd!)})');
+    }
+  } else if (schedule is FixedIntervalMedicationSchedule) {
+    facts.add(
+      '${schedule.durationDays} days every ${schedule.intervalDays} days from '
+      '${formatDate(schedule.anchor)}',
+    );
+    if (schedule.effectiveEnd != null) {
+      facts.add('(stopped ${formatDate(schedule.effectiveEnd!)})');
+    }
+  } else {
+    final continuous = schedule as ContinuousMedicationSchedule;
+    facts.add('continuous since ${formatDate(continuous.start)}');
+    if (continuous.end != null) {
+      facts.add('(stopped ${formatDate(continuous.end!)})');
+    }
   }
-  final continuous = schedule as ContinuousMedicationSchedule;
-  return 'continuous from ${formatDate(continuous.start)}'
-      '${_stoppedSuffix(continuous.end)}';
+  return facts.join(' · ');
 }
-
-String _stoppedSuffix(DateTime? end) =>
-    end == null ? '' : ' (stopped ${formatDate(end)})';

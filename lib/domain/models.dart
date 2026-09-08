@@ -53,6 +53,33 @@ class CyclicalMedicationSchedule extends MedicationSchedule {
       Object.hash(startCycleDay, durationDays, effectiveStart, effectiveEnd);
 }
 
+class FixedIntervalMedicationSchedule extends MedicationSchedule {
+  FixedIntervalMedicationSchedule({
+    required DateTime anchor,
+    required this.intervalDays,
+    required this.durationDays,
+    DateTime? effectiveEnd,
+  }) : anchor = dateOnly(anchor),
+       effectiveEnd = effectiveEnd == null ? null : dateOnly(effectiveEnd);
+
+  final DateTime anchor;
+  final int intervalDays;
+  final int durationDays;
+  final DateTime? effectiveEnd;
+
+  @override
+  bool operator ==(Object other) =>
+      other is FixedIntervalMedicationSchedule &&
+      anchor == other.anchor &&
+      intervalDays == other.intervalDays &&
+      durationDays == other.durationDays &&
+      effectiveEnd == other.effectiveEnd;
+
+  @override
+  int get hashCode =>
+      Object.hash(anchor, intervalDays, durationDays, effectiveEnd);
+}
+
 class ContinuousMedicationSchedule extends MedicationSchedule {
   ContinuousMedicationSchedule({required DateTime start, DateTime? end})
     : start = dateOnly(start),
@@ -102,20 +129,25 @@ class Medication {
   int get hashCode => Object.hash(id, name, dose, schedule, active, notes);
 }
 
-enum WindowAdjustmentKind { endedEarly, skipped }
+enum WindowAdjustmentKind { startedOn, endedEarly, skipped }
 
 class WindowAdjustment {
   WindowAdjustment({
     required this.medicationId,
     required DateTime sourcePeriodStart,
     required this.kind,
+    DateTime? startDate,
     DateTime? endDate,
   }) : sourcePeriodStart = dateOnly(sourcePeriodStart),
+       startDate = startDate == null ? null : dateOnly(startDate),
        endDate = endDate == null ? null : dateOnly(endDate);
 
   final int medicationId;
+
+  /// Recorded period start or unadjusted anchor-derived course start.
   final DateTime sourcePeriodStart;
   final WindowAdjustmentKind kind;
+  final DateTime? startDate;
   final DateTime? endDate;
 
   @override
@@ -124,11 +156,12 @@ class WindowAdjustment {
       medicationId == other.medicationId &&
       sourcePeriodStart == other.sourcePeriodStart &&
       kind == other.kind &&
+      startDate == other.startDate &&
       endDate == other.endDate;
 
   @override
   int get hashCode =>
-      Object.hash(medicationId, sourcePeriodStart, kind, endDate);
+      Object.hash(medicationId, sourcePeriodStart, kind, startDate, endDate);
 }
 
 class SymptomType {

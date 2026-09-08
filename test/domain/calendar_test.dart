@@ -19,6 +19,7 @@ void main() {
     );
 
     expect(marker.inPeriod, isTrue);
+    expect(marker.periodDay, 2);
     expect(marker.startsPeriod, isFalse);
     expect(marker.endsPeriod, isFalse);
   });
@@ -68,7 +69,7 @@ void main() {
     );
   });
 
-  test('five symptoms show four glyphs and a one-item overflow', () {
+  test('five symptoms show three glyphs and a two-item overflow', () {
     final marker = buildDayCellMarkerData(
       date: DateTime(2026, 6, 11),
       today: today,
@@ -85,8 +86,9 @@ void main() {
       ],
     );
 
-    expect(marker.visibleSymptomTypeIds, [1, 2, 3, 4]);
-    expect(marker.symptomOverflowCount, 1);
+    expect(marker.visibleSymptomTypeIds, [1, 2, 3]);
+    expect(marker.symptomCount, 5);
+    expect(marker.symptomOverflowCount, 2);
   });
 
   test('cycle day is one-based from the most recent period start', () {
@@ -98,6 +100,21 @@ void main() {
     expect(cycleDayForDate(DateTime(2026, 5, 29), periods), 1);
     expect(cycleDayForDate(DateTime(2026, 6, 2), periods), 5);
     expect(cycleDayForDate(DateTime(2026, 4, 30), periods), isNull);
+  });
+
+  test('period day is one-based only while a period covers the date', () {
+    final periods = [
+      Period(start: DateTime(2026, 5, 29), end: DateTime(2026, 6, 2)),
+      Period(start: DateTime(2026, 6, 10)),
+    ];
+
+    expect(periodDayForDate(DateTime(2026, 5, 29), periods, today: today), 1);
+    expect(periodDayForDate(DateTime(2026, 6, 2), periods, today: today), 5);
+    expect(periodDayForDate(DateTime(2026, 6, 12), periods, today: today), 3);
+    expect(
+      periodDayForDate(DateTime(2026, 6, 9), periods, today: today),
+      isNull,
+    );
   });
 
   test('symptom severity cycles from three back to none', () {

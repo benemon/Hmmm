@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon monochrome layer (Android 13+). Everything one flat colour: the final
+     shoulder is identified by POSITION, not hue, so nothing is lost. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="27.90"
+        android:translateY="33.98"
+        android:scaleX="0.715"
+        android:scaleY="0.715">
+    <path
+        android:fillColor="#000000"
+        android:pathData="M0,0 h7 v56 h-7 z" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="7"
+        android:strokeLineCap="butt"
+        android:pathData="M3.5,3.5 H15.5 A10,10 0 0 1 25.5,13.5 V56" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="7"
+        android:strokeLineCap="butt"
+        android:pathData="M25.5,3.5 H37.5 A10,10 0 0 1 47.5,13.5 V56" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="7"
+        android:strokeLineCap="butt"
+        android:pathData="M47.5,3.5 H59.5 A10,10 0 0 1 69.5,13.5 V56" />
+    </group>
+</vector>

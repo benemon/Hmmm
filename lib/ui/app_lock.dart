@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app_authenticator.dart';
 import '../data/settings_repository.dart';
+import 'theme.dart';
 
 class AppLockGate extends StatefulWidget {
   const AppLockGate({
@@ -77,14 +78,36 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.lock_outline, size: 36),
-                const SizedBox(height: 12),
-                const Text('Hmmm is locked'),
-                const SizedBox(height: 12),
-                FilledButton(
-                  key: const ValueKey('unlock-app'),
-                  onPressed: _authenticating ? null : _authenticate,
-                  child: const Text('Unlock'),
+                Icon(
+                  Icons.lock_outline,
+                  size: 32,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(height: Dim.s3),
+                Text(
+                  'Hmmm is locked',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: Dim.s1),
+                Text(
+                  'device authentication required',
+                  style:
+                      const TextStyle(
+                        fontFamily: 'DM Mono',
+                        fontSize: 13,
+                        height: 18 / 13,
+                      ).copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+                const SizedBox(height: Dim.s5),
+                SizedBox(
+                  height: Dim.minTarget,
+                  child: FilledButton(
+                    key: const ValueKey('unlock-app'),
+                    onPressed: _authenticating ? null : _authenticate,
+                    child: const Text('Unlock'),
+                  ),
                 ),
               ],
             ),

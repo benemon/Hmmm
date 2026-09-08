@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- windowSplashScreenAnimatedIcon (light). Monogram centred on the 288dp splash canvas. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+    <group
+        android:translateX="82"
+        android:translateY="116"
+        android:scaleX="1"
+        android:scaleY="1">
+    <path
+        android:fillColor="#16150F"
+        android:pathData="M0,0 h7 v56 h-7 z M33,0 h7 v56 h-7 z M0,24.5 h40 v7 h-40 z" />
+    <path
+        android:fillColor="#16150F"
+        android:pathData="M51,0 h7 v56 h-7 z" />
+    <path
+        android:strokeColor="#16150F"
+        android:strokeWidth="7"
+        android:strokeLineCap="butt"
+        android:pathData="M54.5,3.5 H66.5 A10,10 0 0 1 76.5,13.5 V56" />
+    <path
+        android:strokeColor="#16150F"
+        android:strokeWidth="7"
+        android:strokeLineCap="butt"
+        android:pathData="M76.5,3.5 H88.5 A10,10 0 0 1 98.5,13.5 V56" />
+    <path
+        android:strokeColor="#5B3492"
+        android:strokeWidth="7"
+        android:strokeLineCap="butt"
+        android:pathData="M98.5,3.5 H110.5 A10,10 0 0 1 120.5,13.5 V56" />
+    </group>
+</vector>

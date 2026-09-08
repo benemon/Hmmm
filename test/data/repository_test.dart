@@ -62,6 +62,20 @@ void main() {
       indexes,
       contains(containsPair('name', 'symptom_entries_date_type')),
     );
+    final adjustmentColumns = await database.rawQuery(
+      "PRAGMA table_info('window_adjustments')",
+    );
+    expect(
+      adjustmentColumns.map((column) => column['name']),
+      containsAll(['source_period_start', 'start_date', 'end_date']),
+    );
+    final medicationColumns = await database.rawQuery(
+      "PRAGMA table_info('medications')",
+    );
+    expect(
+      medicationColumns.map((column) => column['name']),
+      contains('interval_days'),
+    );
   });
 
   test('app lock defaults off and is stored in settings', () async {
@@ -194,8 +208,50 @@ void main() {
     expect(await repository.listMedications(), isEmpty);
   });
 
+  test('fixed-interval medication stores its anchor and interval', () async {
+    final repository = MedicationRepository(database);
+    final inserted = await repository.insert(
+      Medication(
+        name: 'Progesterone',
+        dose: '200 mg',
+        schedule: FixedIntervalMedicationSchedule(
+          anchor: DateTime(2026, 3, 4, 18),
+          intervalDays: 28,
+          durationDays: 12,
+          effectiveEnd: DateTime(2026, 6, 15, 9),
+        ),
+        active: false,
+      ),
+    );
+
+    expect(await repository.listMedications(), [inserted]);
+    expect(
+      await database.query(
+        'medications',
+        columns: [
+          'schedule_type',
+          'start_cycle_day',
+          'interval_days',
+          'duration_days',
+          'start_date',
+          'end_date',
+        ],
+      ),
+      [
+        {
+          'schedule_type': 'fixed_interval',
+          'start_cycle_day': null,
+          'interval_days': 28,
+          'duration_days': 12,
+          'start_date': '2026-03-04',
+          'end_date': '2026-06-15',
+        },
+      ],
+    );
+  });
+
   test(
-    'window adjustment upsert replaces and medication delete cascades',
+    'window adjustment upsert stores combined record and delete cascades',
     () async {
       final repository = MedicationRepository(database);
       var notifications = 0;
@@ -229,7 +285,9 @@ void main() {
         WindowAdjustment(
           medicationId: medication.id!,
           sourcePeriodStart: sourcePeriodStart,
-          kind: WindowAdjustmentKind.skipped,
+          kind: WindowAdjustmentKind.endedEarly,
+          startDate: DateTime(2026, 6, 16),
+          endDate: DateTime(2026, 6, 18),
         ),
       );
 
@@ -237,7 +295,9 @@ void main() {
         WindowAdjustment(
           medicationId: medication.id!,
           sourcePeriodStart: sourcePeriodStart,
-          kind: WindowAdjustmentKind.skipped,
+          kind: WindowAdjustmentKind.endedEarly,
+          startDate: DateTime(2026, 6, 16),
+          endDate: DateTime(2026, 6, 18),
         ),
       ]);
       expect(
@@ -249,9 +309,28 @@ void main() {
       );
       expect(notifications, 3);
 
+      await repository.setAdjustment(
+        WindowAdjustment(
+          medicationId: medication.id!,
+          sourcePeriodStart: sourcePeriodStart,
+          kind: WindowAdjustmentKind.skipped,
+          startDate: DateTime(2026, 6, 16),
+          endDate: DateTime(2026, 6, 18),
+        ),
+      );
+      expect(
+        (await repository.listAdjustments()).single.kind,
+        WindowAdjustmentKind.skipped,
+      );
+      expect(
+        (await repository.listAdjustments()).single.startDate,
+        DateTime(2026, 6, 16),
+      );
+      expect(notifications, 4);
+
       await repository.clearAdjustment(medication.id!, sourcePeriodStart);
       expect(await repository.listAdjustments(), isEmpty);
-      expect(notifications, 4);
+      expect(notifications, 5);
 
       await repository.setAdjustment(
         WindowAdjustment(
@@ -272,6 +351,20 @@ void main() {
     );
     expect((await repository.listTypes()).last, inserted);
     expect(inserted.builtin, isFalse);
+  });
+
+  test('entryCountsByType groups entries by symptom type', () async {
+    final repository = SymptomRepository(database);
+    final today = DateTime(2026, 6, 15);
+    for (final entry in [
+      SymptomEntry(date: DateTime(2026, 6, 10), typeId: 1, severity: 1),
+      SymptomEntry(date: DateTime(2026, 6, 11), typeId: 1, severity: 2),
+      SymptomEntry(date: DateTime(2026, 6, 12), typeId: 2, severity: 3),
+    ]) {
+      await repository.upsertEntry(entry, today: today);
+    }
+
+    expect(await repository.entryCountsByType(), {1: 2, 2: 1});
   });
 
   test('deleting a symptom type cascades only its entries', () async {

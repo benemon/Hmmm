@@ -44,6 +44,18 @@ class SymptomRepository extends ChangeNotifier {
     return rows.map(_symptomEntryFromRow).toList();
   }
 
+  Future<Map<int, int>> entryCountsByType() async {
+    final rows = await _database.rawQuery('''
+      SELECT type_id, COUNT(*) AS entry_count
+      FROM symptom_entries
+      GROUP BY type_id
+      ORDER BY type_id ASC
+    ''');
+    return {
+      for (final row in rows) row['type_id'] as int: row['entry_count'] as int,
+    };
+  }
+
   Future<SymptomEntry?> upsertEntry(
     SymptomEntry entry, {
     required DateTime today,

@@ -13,7 +13,7 @@ class MedicationRepository extends ChangeNotifier {
 
   Future<List<Medication>> listMedications() async {
     final rows = await _database.rawQuery('''
-      SELECT id, name, dose, schedule_type, start_cycle_day, duration_days,
+      SELECT id, name, dose, schedule_type, start_cycle_day, interval_days, duration_days,
              start_date, end_date, active, notes
       FROM medications
       ORDER BY id ASC
@@ -27,15 +27,16 @@ class MedicationRepository extends ChangeNotifier {
     final id = await _database.rawInsert(
       '''
       INSERT INTO medications(
-        name, dose, schedule_type, start_cycle_day, duration_days,
-        start_date, end_date, active, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        name, dose, schedule_type, start_cycle_day, interval_days,
+        duration_days, start_date, end_date, active, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ''',
       [
         row['name'],
         row['dose'],
         row['schedule_type'],
         row['start_cycle_day'],
+        row['interval_days'],
         row['duration_days'],
         row['start_date'],
         row['end_date'],
@@ -65,7 +66,8 @@ class MedicationRepository extends ChangeNotifier {
       '''
       UPDATE medications SET
         name = ?, dose = ?, schedule_type = ?, start_cycle_day = ?,
-        duration_days = ?, start_date = ?, end_date = ?, active = ?, notes = ?
+        interval_days = ?, duration_days = ?, start_date = ?, end_date = ?,
+        active = ?, notes = ?
       WHERE id = ?
       ''',
       [
@@ -73,6 +75,7 @@ class MedicationRepository extends ChangeNotifier {
         row['dose'],
         row['schedule_type'],
         row['start_cycle_day'],
+        row['interval_days'],
         row['duration_days'],
         row['start_date'],
         row['end_date'],
@@ -91,7 +94,7 @@ class MedicationRepository extends ChangeNotifier {
 
   Future<List<WindowAdjustment>> listAdjustments() async {
     final rows = await _database.rawQuery('''
-      SELECT medication_id, source_period_start, kind, end_date
+      SELECT medication_id, source_period_start, kind, start_date, end_date
       FROM window_adjustments
       ORDER BY medication_id ASC, source_period_start ASC
     ''');
@@ -103,24 +106,30 @@ class MedicationRepository extends ChangeNotifier {
         adjustment.endDate == null) {
       throw ArgumentError('End date is required for an ended course.');
     }
+    if (adjustment.kind == WindowAdjustmentKind.startedOn &&
+        adjustment.startDate == null) {
+      throw ArgumentError('Start date is required for a shifted course.');
+    }
     await _database.rawInsert(
       '''
       INSERT INTO window_adjustments(
-        medication_id, source_period_start, kind, end_date
-      ) VALUES (?, ?, ?, ?)
+        medication_id, source_period_start, kind, start_date, end_date
+      ) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(medication_id, source_period_start) DO UPDATE SET
         kind = excluded.kind,
+        start_date = excluded.start_date,
         end_date = excluded.end_date
       ''',
       [
         adjustment.medicationId,
         dateToIso(adjustment.sourcePeriodStart),
-        adjustment.kind == WindowAdjustmentKind.endedEarly
-            ? 'ended_early'
-            : 'skipped',
-        adjustment.kind == WindowAdjustmentKind.endedEarly
-            ? dateToIso(adjustment.endDate!)
-            : null,
+        switch (adjustment.kind) {
+          WindowAdjustmentKind.startedOn => 'started_on',
+          WindowAdjustmentKind.endedEarly => 'ended_early',
+          WindowAdjustmentKind.skipped => 'skipped',
+        },
+        adjustment.startDate == null ? null : dateToIso(adjustment.startDate!),
+        adjustment.endDate == null ? null : dateToIso(adjustment.endDate!),
       ],
     );
     notifyListeners();
@@ -150,6 +159,7 @@ class MedicationRepository extends ChangeNotifier {
     required List<Medication> medications,
     required List<Period> periods,
     required DateRange range,
+    required DateTime today,
   }) async {
     final adjustments = await listAdjustments();
     return (
@@ -161,6 +171,7 @@ class MedicationRepository extends ChangeNotifier {
             periods,
             range,
             adjustments,
+            today: today,
           ),
       },
     );
@@ -173,9 +184,14 @@ WindowAdjustment _windowAdjustmentFromRow(Map<String, Object?> row) =>
     WindowAdjustment(
       medicationId: row['medication_id'] as int,
       sourcePeriodStart: dateFromIso(row['source_period_start'] as String),
-      kind: row['kind'] == 'ended_early'
-          ? WindowAdjustmentKind.endedEarly
-          : WindowAdjustmentKind.skipped,
+      kind: switch (row['kind']) {
+        'started_on' => WindowAdjustmentKind.startedOn,
+        'ended_early' => WindowAdjustmentKind.endedEarly,
+        _ => WindowAdjustmentKind.skipped,
+      },
+      startDate: row['start_date'] == null
+          ? null
+          : dateFromIso(row['start_date'] as String),
       endDate: row['end_date'] == null
           ? null
           : dateFromIso(row['end_date'] as String),
@@ -190,6 +206,15 @@ Medication _medicationFromRow(Map<String, Object?> row) {
       effectiveStart: row['start_date'] == null
           ? null
           : dateFromIso(row['start_date'] as String),
+      effectiveEnd: row['end_date'] == null
+          ? null
+          : dateFromIso(row['end_date'] as String),
+    );
+  } else if (row['schedule_type'] == 'fixed_interval') {
+    schedule = FixedIntervalMedicationSchedule(
+      anchor: dateFromIso(row['start_date'] as String),
+      intervalDays: row['interval_days'] as int,
+      durationDays: row['duration_days'] as int,
       effectiveEnd: row['end_date'] == null
           ? null
           : dateFromIso(row['end_date'] as String),
@@ -220,10 +245,27 @@ Map<String, Object?> _medicationToRow(Medication medication) {
       'dose': medication.dose,
       'schedule_type': 'cyclical',
       'start_cycle_day': schedule.startCycleDay,
+      'interval_days': null,
       'duration_days': schedule.durationDays,
       'start_date': schedule.effectiveStart == null
           ? null
           : dateToIso(schedule.effectiveStart!),
+      'end_date': schedule.effectiveEnd == null
+          ? null
+          : dateToIso(schedule.effectiveEnd!),
+      'active': medication.active ? 1 : 0,
+      'notes': medication.notes,
+    };
+  }
+  if (schedule is FixedIntervalMedicationSchedule) {
+    return {
+      'name': medication.name,
+      'dose': medication.dose,
+      'schedule_type': 'fixed_interval',
+      'start_cycle_day': null,
+      'interval_days': schedule.intervalDays,
+      'duration_days': schedule.durationDays,
+      'start_date': dateToIso(schedule.anchor),
       'end_date': schedule.effectiveEnd == null
           ? null
           : dateToIso(schedule.effectiveEnd!),
@@ -237,6 +279,7 @@ Map<String, Object?> _medicationToRow(Medication medication) {
     'dose': medication.dose,
     'schedule_type': 'continuous',
     'start_cycle_day': null,
+    'interval_days': null,
     'duration_days': null,
     'start_date': dateToIso(continuous.start),
     'end_date': continuous.end == null ? null : dateToIso(continuous.end!),

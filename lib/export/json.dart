@@ -11,6 +11,7 @@ const _medicationColumns = [
   'dose',
   'schedule_type',
   'start_cycle_day',
+  'interval_days',
   'duration_days',
   'start_date',
   'end_date',

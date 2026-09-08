@@ -68,18 +68,44 @@ class _HomeShellState extends State<HomeShell> {
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.calendar_month_outlined),
-            selectedIcon: Icon(Icons.calendar_month),
-            label: 'Calendar',
+            selectedIcon: _SelectedNavigationIcon(icon: Icons.calendar_month),
+            label: 'CALENDAR',
           ),
           NavigationDestination(
             icon: Icon(Icons.table_chart_outlined),
-            selectedIcon: Icon(Icons.table_chart),
-            label: 'Trends',
+            selectedIcon: _SelectedNavigationIcon(icon: Icons.table_chart),
+            label: 'TRENDS',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: 'Settings',
+            selectedIcon: _SelectedNavigationIcon(icon: Icons.settings),
+            label: 'SETTINGS',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SelectedNavigationIcon extends StatelessWidget {
+  const _SelectedNavigationIcon({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 24,
+      height: 30,
+      child: Column(
+        children: [
+          Icon(icon, size: 24),
+          const Spacer(),
+          Container(
+            key: const ValueKey('selected-navigation-underline'),
+            width: 24,
+            height: 2,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ],
       ),

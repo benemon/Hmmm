@@ -35,6 +35,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Hmmm is locked'), findsOneWidget);
+    expect(find.text('device authentication required'), findsOneWidget);
     expect(find.text('clinical data'), findsNothing);
     expect(authenticator.calls, 1);
 

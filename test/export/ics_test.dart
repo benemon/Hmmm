@@ -134,6 +134,7 @@ void main() {
       medications: [medication],
       periods: [period],
       range: range,
+      today: DateTime(2026, 6, 15),
     );
 
     final output = buildIcs(
@@ -151,6 +152,121 @@ void main() {
 
     expect(output, isNot(contains('SUMMARY:Progesterone')));
     expect(output, isNot(contains('hmmm-medication-progesterone')));
+    repository.dispose();
+    await database.close();
+  });
+
+  test('shifted ICS event moves dates but keeps its source UID', () async {
+    final database = await openHmmmDatabase(
+      factory: databaseFactoryFfiNoIsolate,
+      path: inMemoryDatabasePath,
+    );
+    final repository = MedicationRepository(database);
+    final medication = await repository.insert(
+      Medication(
+        name: 'Progesterone',
+        dose: '200 mg',
+        schedule: CyclicalMedicationSchedule(startCycleDay: 1, durationDays: 4),
+        active: true,
+      ),
+    );
+    final period = Period(start: DateTime(2026, 6, 1));
+    await repository.setAdjustment(
+      WindowAdjustment(
+        medicationId: medication.id!,
+        sourcePeriodStart: period.start,
+        kind: WindowAdjustmentKind.startedOn,
+        startDate: DateTime(2026, 6, 3),
+      ),
+    );
+    final range = DateRange(
+      start: DateTime(2026, 6, 1),
+      end: DateTime(2026, 6, 30),
+    );
+    final windows = await repository.loadAdjustedWindows(
+      medications: [medication],
+      periods: [period],
+      range: range,
+      today: DateTime(2026, 6, 15),
+    );
+
+    final output = buildIcs(
+      periods: const [],
+      windowsByMedication: [
+        IcsMedicationWindows(
+          name: medication.name,
+          windows: windows.windowsByMedicationId[medication.id!]!,
+        ),
+      ],
+      symptomDaysByType: const [],
+      range: range,
+      exportedAt: DateTime(2026, 6, 15),
+    );
+
+    expect(
+      output,
+      contains('UID:hmmm-medication-progesterone-2026-06-01@hmmm.local'),
+    );
+    expect(output, contains('DTSTART;VALUE=DATE:20260603'));
+    expect(output, contains('DTEND;VALUE=DATE:20260607'));
+    repository.dispose();
+    await database.close();
+  });
+
+  test('fixed-interval UID uses the unadjusted anchor-derived start', () async {
+    final database = await openHmmmDatabase(
+      factory: databaseFactoryFfiNoIsolate,
+      path: inMemoryDatabasePath,
+    );
+    final repository = MedicationRepository(database);
+    final medication = await repository.insert(
+      Medication(
+        name: 'Progesterone',
+        dose: '200 mg',
+        schedule: FixedIntervalMedicationSchedule(
+          anchor: DateTime(2026, 3, 4),
+          intervalDays: 28,
+          durationDays: 12,
+        ),
+        active: true,
+      ),
+    );
+    await repository.setAdjustment(
+      WindowAdjustment(
+        medicationId: medication.id!,
+        sourcePeriodStart: DateTime(2026, 4, 1),
+        kind: WindowAdjustmentKind.startedOn,
+        startDate: DateTime(2026, 4, 3),
+      ),
+    );
+    final range = DateRange(
+      start: DateTime(2026, 4, 1),
+      end: DateTime(2026, 4, 30),
+    );
+    final windows = await repository.loadAdjustedWindows(
+      medications: [medication],
+      periods: const [],
+      range: range,
+      today: DateTime(2026, 4, 2),
+    );
+    final output = buildIcs(
+      periods: const [],
+      windowsByMedication: [
+        IcsMedicationWindows(
+          name: medication.name,
+          windows: windows.windowsByMedicationId[medication.id!]!,
+        ),
+      ],
+      symptomDaysByType: const [],
+      range: range,
+      exportedAt: DateTime(2026, 4, 2),
+    );
+
+    expect(
+      output,
+      contains('UID:hmmm-medication-progesterone-2026-04-01@hmmm.local'),
+    );
+    expect(output, contains('DTSTART;VALUE=DATE:20260403'));
     repository.dispose();
     await database.close();
   });

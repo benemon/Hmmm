@@ -2,6 +2,9 @@ import 'dates.dart';
 import 'hrt_window.dart';
 import 'models.dart';
 
+/// Kept Flutter-free; Dim.visibleGlyphLimit is its UI-layer twin.
+const visibleDayCellSymptomLimit = 3;
+
 class MedicationDayMarker {
   const MedicationDayMarker({
     required this.medicationId,
@@ -19,18 +22,22 @@ class MedicationDayMarker {
 class DayCellMarkerData {
   const DayCellMarkerData({
     required this.inPeriod,
+    required this.periodDay,
     required this.startsPeriod,
     required this.endsPeriod,
     required this.medicationMarkers,
     required this.visibleSymptomTypeIds,
+    required this.symptomCount,
     required this.symptomOverflowCount,
   });
 
   final bool inPeriod;
+  final int? periodDay;
   final bool startsPeriod;
   final bool endsPeriod;
   final List<MedicationDayMarker> medicationMarkers;
   final List<int> visibleSymptomTypeIds;
+  final int symptomCount;
   final int symptomOverflowCount;
 }
 
@@ -84,18 +91,38 @@ DayCellMarkerData buildDayCellMarkerData({
           .map((entry) => entry.typeId)
           .toList()
         ..sort();
-  const visibleLimit = 4;
-
   return DayCellMarkerData(
     inPeriod: period != null,
+    periodDay: period == null
+        ? null
+        : calendarDaysBetween(period.start, day) + 1,
     startsPeriod: period?.start == day,
     endsPeriod: period?.end == day,
     medicationMarkers: medicationMarkers,
-    visibleSymptomTypeIds: symptomTypeIds.take(visibleLimit).toList(),
-    symptomOverflowCount: symptomTypeIds.length > visibleLimit
-        ? symptomTypeIds.length - visibleLimit
+    visibleSymptomTypeIds: symptomTypeIds
+        .take(visibleDayCellSymptomLimit)
+        .toList(),
+    symptomCount: symptomTypeIds.length,
+    symptomOverflowCount: symptomTypeIds.length > visibleDayCellSymptomLimit
+        ? symptomTypeIds.length - visibleDayCellSymptomLimit
         : 0,
   );
+}
+
+int? periodDayForDate(
+  DateTime date,
+  List<Period> periods, {
+  required DateTime today,
+}) {
+  final day = dateOnly(date);
+  final currentDate = dateOnly(today);
+  for (final period in periods) {
+    final end = period.end ?? currentDate;
+    if (!day.isBefore(period.start) && !day.isAfter(end)) {
+      return calendarDaysBetween(period.start, day) + 1;
+    }
+  }
+  return null;
 }
 
 int? cycleDayForDate(DateTime date, List<Period> periods) {

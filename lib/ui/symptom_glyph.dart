@@ -2,7 +2,21 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import 'theme.dart';
+enum SymptomGlyph {
+  circle,
+  diamond,
+  triangle,
+  square,
+  plus,
+  circleOpen,
+  diamondOpen,
+  triangleOpen,
+  squareOpen,
+  cross;
+
+  static SymptomGlyph forTypeId(int symptomTypeId) =>
+      values[(symptomTypeId - 1) % values.length];
+}
 
 class SymptomGlyphMark extends StatelessWidget {
   const SymptomGlyphMark({super.key, required this.typeId, required this.size});
@@ -32,7 +46,7 @@ class _SymptomGlyphPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = color
-      ..strokeWidth = math.max(1.2, size.shortestSide / 8)
+      ..strokeWidth = math.max(1.5, size.shortestSide / 8)
       ..strokeCap = StrokeCap.square;
     final center = size.center(Offset.zero);
     final inset = paint.strokeWidth / 2;

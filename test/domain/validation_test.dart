@@ -100,4 +100,31 @@ void main() {
       ),
     );
   });
+
+  test('fixed interval requires positive interval and duration only', () {
+    Medication medication({required int interval, required int duration}) =>
+        Medication(
+          name: 'Progesterone',
+          dose: '200 mg',
+          schedule: FixedIntervalMedicationSchedule(
+            anchor: DateTime(2026, 3, 4),
+            intervalDays: interval,
+            durationDays: duration,
+          ),
+          active: true,
+        );
+
+    expect(
+      () => validateMedication(medication(interval: 0, duration: 12)),
+      throwsArgumentError,
+    );
+    expect(
+      () => validateMedication(medication(interval: 28, duration: 0)),
+      throwsArgumentError,
+    );
+    expect(
+      () => validateMedication(medication(interval: 7, duration: 12)),
+      returnsNormally,
+    );
+  });
 }
