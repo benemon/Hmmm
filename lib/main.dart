@@ -62,21 +62,29 @@ class HmmmApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Hmmm',
-      theme: hmmmTheme(Brightness.light),
-      darkTheme: hmmmTheme(Brightness.dark),
-      home: AppLockGate(
-        settingsRepository: settingsRepository,
-        authenticator: authenticator,
-        child: HomeShell(
-          periodRepository: periodRepository,
-          medicationRepository: medicationRepository,
-          symptomRepository: symptomRepository,
+    return ListenableBuilder(
+      listenable: settingsRepository,
+      builder: (context, child) => MaterialApp(
+        title: 'Hmmm',
+        theme: hmmmTheme(Brightness.light),
+        darkTheme: hmmmTheme(Brightness.dark),
+        themeMode: switch (settingsRepository.themeMode) {
+          AppThemeMode.system => ThemeMode.system,
+          AppThemeMode.light => ThemeMode.light,
+          AppThemeMode.dark => ThemeMode.dark,
+        },
+        home: AppLockGate(
           settingsRepository: settingsRepository,
-          backupRepository: backupRepository,
           authenticator: authenticator,
-          today: today,
+          child: HomeShell(
+            periodRepository: periodRepository,
+            medicationRepository: medicationRepository,
+            symptomRepository: symptomRepository,
+            settingsRepository: settingsRepository,
+            backupRepository: backupRepository,
+            authenticator: authenticator,
+            today: today,
+          ),
         ),
       ),
     );

@@ -67,79 +67,54 @@ class SettingsScreen extends StatelessWidget {
             body: data == null
                 ? const SizedBox.shrink()
                 : ListView(
+                    key: const ValueKey('settings-list'),
                     children: [
-                      const _SettingsGroupHeader('RECORDS'),
                       _SettingsRow(
-                        title: 'Medications',
+                        key: const ValueKey('settings-records'),
+                        title: 'Records',
                         detail:
-                            '${data.medications.length} · '
-                            '${data.medications.where((item) => item.active).length} active',
+                            '${_count(data.medications.length, 'medication')} · '
+                            '${_count(data.periods.length, 'period')} · '
+                            '${_count(data.symptomTypes.length, 'symptom type')}',
                         navigating: true,
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
-                            builder: (context) => MedicationsScreen(
+                            builder: (context) => _RecordsScreen(
                               medicationRepository: medicationRepository,
                               periodRepository: periodRepository,
+                              symptomRepository: symptomRepository,
                               today: today,
                             ),
                           ),
                         ),
                       ),
                       _SettingsRow(
-                        title: 'Period records',
-                        detail: _periodDetail(data.periods),
+                        key: const ValueKey('settings-export-print'),
+                        title: 'Export & print',
+                        detail: 'ics · json · pdf',
                         navigating: true,
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
-                            builder: (context) => PeriodRecordsScreen(
-                              repository: periodRepository,
-                              today: today,
+                            builder: (context) => _ExportPrintScreen(
+                              onPrintReport: () => _printReport(context),
+                              onExportCalendar: () => _exportCalendar(context),
+                              onExportData: () => _exportJson(context),
+                              onImportData: () => _importJson(context),
                             ),
                           ),
                         ),
                       ),
                       _SettingsRow(
-                        title: 'Symptom types',
-                        detail:
-                            '${data.symptomTypes.length} · '
-                            '${data.symptomTypes.where((item) => !item.builtin).length} custom',
-                        navigating: true,
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (context) => SymptomTypesScreen(
-                              repository: symptomRepository,
-                            ),
-                          ),
-                        ),
+                        key: const ValueKey('settings-theme'),
+                        title: 'Theme',
+                        detail: settingsRepository.themeMode.name,
+                        onTap: () => _setThemeMode(context),
                       ),
-                      const _SettingsGroupHeader('EXPORT'),
-                      _SettingsRow(
-                        title: 'Print report',
-                        detail: 'PDF · choose 1/3/6/12 months',
-                        onTap: () => _printReport(context),
-                      ),
-                      _SettingsRow(
-                        title: 'Export calendar',
-                        detail: 'hmmm-calendar.ics',
-                        onTap: () => _exportCalendar(context),
-                      ),
-                      _SettingsRow(
-                        title: 'Export data',
-                        detail: 'hmmm-data.json · complete record',
-                        onTap: () => _exportJson(context),
-                      ),
-                      _SettingsRow(
-                        title: 'Import data',
-                        detail: 'JSON · replaces everything',
-                        onTap: () => _importJson(context),
-                      ),
-                      const _SettingsGroupHeader('SECURITY'),
                       _RequireUnlockRow(
+                        key: const ValueKey('settings-require-unlock'),
                         value: settingsRepository.requireUnlock,
                         onChanged: (value) => _setRequireUnlock(context, value),
                       ),
-                      const _SettingsGroupHeader('ABOUT'),
-                      const _AboutBlock(),
                     ],
                   ),
           );
@@ -203,17 +178,17 @@ class SettingsScreen extends StatelessWidget {
   }
 
   Future<void> _importJson(BuildContext context) async {
-    final controller = TextEditingController();
+    var input = '';
     final source = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Import data'),
         content: TextField(
           key: const ValueKey('import-json-text'),
-          controller: controller,
           autofocus: true,
           minLines: 8,
           maxLines: 16,
+          onChanged: (value) => input = value,
           decoration: const InputDecoration(hintText: 'Paste JSON'),
         ),
         actions: [
@@ -222,13 +197,12 @@ class SettingsScreen extends StatelessWidget {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
+            onPressed: () => Navigator.pop(context, input),
             child: const Text('Continue'),
           ),
         ],
       ),
     );
-    controller.dispose();
     if (source == null || !context.mounted) return;
     try {
       parseJsonExport(source);
@@ -321,37 +295,160 @@ class SettingsScreen extends StatelessWidget {
     }
     await settingsRepository.setRequireUnlock(true);
   }
+
+  Future<void> _setThemeMode(BuildContext context) async {
+    final mode = await _chooseThemeMode(context);
+    if (mode == null) return;
+    await settingsRepository.setThemeMode(mode);
+  }
 }
 
-class _SettingsGroupHeader extends StatelessWidget {
-  const _SettingsGroupHeader(this.label);
+class _RecordsScreen extends StatelessWidget {
+  const _RecordsScreen({
+    required this.periodRepository,
+    required this.medicationRepository,
+    required this.symptomRepository,
+    required this.today,
+  });
 
-  final String label;
+  final PeriodRepository periodRepository;
+  final MedicationRepository medicationRepository;
+  final SymptomRepository symptomRepository;
+  final DateTime today;
+
+  Future<_SettingsData> _loadData() async => _SettingsData(
+    periods: await periodRepository.listPeriods(),
+    medications: await medicationRepository.listMedications(),
+    symptomTypes: await symptomRepository.listTypes(),
+    symptomEntries: const [],
+  );
 
   @override
-  Widget build(BuildContext context) {
-    final rule = Theme.of(context).colorScheme.outlineVariant;
-    return Semantics(
-      header: true,
-      child: ExcludeFocus(
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(Dim.s4, Dim.s3, Dim.s4, 6),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            border: Border(
-              top: BorderSide(color: rule),
-              bottom: BorderSide(color: rule),
-            ),
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([
+      periodRepository,
+      medicationRepository,
+      symptomRepository,
+    ]),
+    builder: (context, child) => FutureBuilder<_SettingsData>(
+      future: _loadData(),
+      builder: (context, snapshot) {
+        final data = snapshot.data;
+        return Scaffold(
+          key: const ValueKey('records-screen'),
+          appBar: AppBar(
+            title: Semantics(namesRoute: true, child: const Text('Records')),
           ),
-          child: Text(label, style: Theme.of(context).textTheme.labelSmall),
+          body: data == null
+              ? const SizedBox.shrink()
+              : ListView(
+                  children: [
+                    _SettingsRow(
+                      key: const ValueKey('records-medications'),
+                      title: 'Medications',
+                      detail:
+                          '${data.medications.length} · '
+                          '${data.medications.where((item) => item.active).length} active',
+                      navigating: true,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (context) => MedicationsScreen(
+                            medicationRepository: medicationRepository,
+                            periodRepository: periodRepository,
+                            today: today,
+                          ),
+                        ),
+                      ),
+                    ),
+                    _SettingsRow(
+                      key: const ValueKey('records-periods'),
+                      title: 'Period records',
+                      detail: _periodDetail(data.periods),
+                      navigating: true,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (context) => PeriodRecordsScreen(
+                            repository: periodRepository,
+                            today: today,
+                          ),
+                        ),
+                      ),
+                    ),
+                    _SettingsRow(
+                      key: const ValueKey('records-symptom-types'),
+                      title: 'Symptom types',
+                      detail:
+                          '${data.symptomTypes.length} · '
+                          '${data.symptomTypes.where((item) => !item.builtin).length} custom',
+                      navigating: true,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (context) =>
+                              SymptomTypesScreen(repository: symptomRepository),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+        );
+      },
+    ),
+  );
+}
+
+class _ExportPrintScreen extends StatelessWidget {
+  const _ExportPrintScreen({
+    required this.onPrintReport,
+    required this.onExportCalendar,
+    required this.onExportData,
+    required this.onImportData,
+  });
+
+  final VoidCallback onPrintReport;
+  final VoidCallback onExportCalendar;
+  final VoidCallback onExportData;
+  final VoidCallback onImportData;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    key: const ValueKey('export-print-screen'),
+    appBar: AppBar(
+      title: Semantics(namesRoute: true, child: const Text('Export & print')),
+    ),
+    body: ListView(
+      children: [
+        _SettingsRow(
+          key: const ValueKey('export-print-report'),
+          title: 'Print report',
+          detail: 'PDF · choose 1/3/6/12 months',
+          onTap: onPrintReport,
         ),
-      ),
-    );
-  }
+        _SettingsRow(
+          key: const ValueKey('export-calendar'),
+          title: 'Export calendar',
+          detail: 'hmmm-calendar.ics',
+          onTap: onExportCalendar,
+        ),
+        _SettingsRow(
+          key: const ValueKey('export-data'),
+          title: 'Export data',
+          detail: 'hmmm-data.json · complete record',
+          onTap: onExportData,
+        ),
+        _SettingsRow(
+          key: const ValueKey('import-data'),
+          title: 'Import data',
+          detail: 'JSON · replaces everything',
+          onTap: onImportData,
+        ),
+      ],
+    ),
+  );
 }
 
 class _SettingsRow extends StatelessWidget {
   const _SettingsRow({
+    super.key,
     required this.title,
     required this.detail,
     required this.onTap,
@@ -365,25 +462,35 @@ class _SettingsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: Dim.rowMinHeight),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: Dim.s4),
-        title: Text(title),
-        subtitle: Text(
-          detail,
-          style: HmmmType.of(context).figureSmall
-              .copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+    return Semantics(
+      button: true,
+      label: '$title, $detail',
+      excludeSemantics: true,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: Dim.rowMinHeight),
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: Dim.s4),
+          title: Text(title),
+          subtitle: Text(
+            detail,
+            style: HmmmType.of(context).figureSmall.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          trailing: navigating ? const Icon(Icons.chevron_right) : null,
+          onTap: onTap,
         ),
-        trailing: navigating ? const Icon(Icons.chevron_right) : null,
-        onTap: onTap,
       ),
     );
   }
 }
 
 class _RequireUnlockRow extends StatelessWidget {
-  const _RequireUnlockRow({required this.value, required this.onChanged});
+  const _RequireUnlockRow({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
 
   final bool value;
   final ValueChanged<bool> onChanged;
@@ -406,27 +513,6 @@ class _RequireUnlockRow extends StatelessWidget {
           ),
           value: value,
           onChanged: onChanged,
-        ),
-      ),
-    );
-  }
-}
-
-class _AboutBlock extends StatelessWidget {
-  const _AboutBlock();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(Dim.s4, Dim.s4, Dim.s4, Dim.s7),
-      child: Text(
-        'Hmmm 0.1.2\n'
-        'local SQLite · no network permission\n'
-        'excluded from device backup\n'
-        'JSON export is the only way data leaves this device',
-        style: HmmmType.of(context).figureSmall.copyWith(
-          height: 20 / 13,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
       ),
     );
@@ -464,6 +550,36 @@ Future<int?> _chooseRange(BuildContext context, DateTime today) =>
       ),
     );
 
+Future<AppThemeMode?> _chooseThemeMode(BuildContext context) =>
+    showDialog<AppThemeMode>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Theme'),
+        contentPadding: const EdgeInsets.symmetric(vertical: Dim.s2),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (mode, label, detail) in const [
+              (AppThemeMode.system, 'System', 'follow the device setting'),
+              (AppThemeMode.light, 'Light', 'always light'),
+              (AppThemeMode.dark, 'Dark', 'always dark'),
+            ])
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: Dim.minTarget),
+                child: ListTile(
+                  title: Text(label),
+                  subtitle: Text(
+                    detail,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  onTap: () => Navigator.pop(context, mode),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+
 DateRange rangeForMonths(DateTime today, int months) => DateRange(
   start: DateTime(today.year, today.month - months + 1),
   end: today,
@@ -478,6 +594,8 @@ String _periodDetail(List<Period> periods) {
   return '${periods.length} · newest ${formatDate(newest.start)}, '
       '${newest.end == null ? 'open' : 'ended ${formatDate(newest.end!)}'}';
 }
+
+String _count(int count, String noun) => '$count $noun${count == 1 ? '' : 's'}';
 
 Future<void> _shareTextFile(
   BuildContext context,

@@ -78,15 +78,20 @@ void main() {
     );
   });
 
-  test('app lock defaults off and is stored in settings', () async {
+  test('settings defaults are stored', () async {
     final repository = SettingsRepository(database);
 
     await repository.load();
 
     expect(repository.requireUnlock, isFalse);
-    expect(await database.query('settings'), [
-      {'key': 'require_unlock', 'value': 'false'},
-    ]);
+    expect(repository.themeMode, AppThemeMode.system);
+    expect(
+      await database.query('settings'),
+      containsAll([
+        {'key': 'require_unlock', 'value': 'false'},
+        {'key': 'theme_mode', 'value': 'system'},
+      ]),
+    );
   });
 
   test('period insert, read, update, and delete round trip', () async {

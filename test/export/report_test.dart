@@ -6,6 +6,7 @@ import 'package:hmmm/domain/models.dart';
 import 'package:hmmm/domain/trends.dart';
 import 'package:hmmm/export/report.dart';
 import 'package:hmmm/ui/theme.dart';
+import 'package:pdf/pdf.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -87,6 +88,43 @@ void main() {
       MarkerTextureMetrics.dashedGap,
     ));
     expect(reportTextureMetrics(MarkerTexture.dashed, 24), (8.0, 4.0));
+  });
+
+  test('every report page is portrait A4', () async {
+    final data = assembleReportData(
+      periods: const [],
+      medications: const [],
+      symptomTypes: const [],
+      symptomEntries: const [],
+      windowsByMedicationId: const {},
+      range: DateRange(start: DateTime(2026, 6, 1), end: DateTime(2026, 6, 15)),
+      today: DateTime(2026, 6, 15),
+    );
+
+    final source = String.fromCharCodes(await buildReportPdf(data));
+    final pageCount = RegExp(r'/Type\s*/Page(?!s)\b').allMatches(source).length;
+    final dimensions =
+        RegExp(
+              r'/MediaBox\s*\[\s*0(?:\.0+)?\s+0(?:\.0+)?\s+'
+              r'([0-9.]+)\s+([0-9.]+)\s*\]',
+            )
+            .allMatches(source)
+            .map(
+              (match) => (
+                double.parse(match.group(1)!),
+                double.parse(match.group(2)!),
+              ),
+            )
+            .toList();
+
+    expect(pageCount, greaterThan(1));
+    expect(dimensions, hasLength(pageCount));
+    expect(dimensions.toSet(), hasLength(1));
+    for (final (width, height) in dimensions) {
+      expect(width, closeTo(PdfPageFormat.a4.width, 0.01));
+      expect(height, closeTo(PdfPageFormat.a4.height, 0.01));
+      expect(width, lessThan(height));
+    }
   });
 
   test(

@@ -527,7 +527,16 @@ ThemeData hmmmTheme(Brightness brightness) {
       height: Dim.navBarHeight,
       elevation: 0,
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-      labelTextStyle: WidgetStatePropertyAll(text.labelSmall),
+      iconTheme: WidgetStateProperty.resolveWith(
+        (states) => IconThemeData(
+          color: states.contains(WidgetState.selected) ? ink : inkMuted,
+        ),
+      ),
+      labelTextStyle: WidgetStateProperty.resolveWith(
+        (states) => text.labelSmall!.copyWith(
+          color: states.contains(WidgetState.selected) ? ink : inkMuted,
+        ),
+      ),
     ),
     switchTheme: SwitchThemeData(
       trackColor: WidgetStateProperty.resolveWith(

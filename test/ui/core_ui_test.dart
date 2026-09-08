@@ -117,6 +117,34 @@ void main() {
     expect(find.text('CALENDAR'), findsOneWidget);
   });
 
+  testWidgets('navigation theme resolves selected and unselected ink colors', (
+    tester,
+  ) async {
+    for (final brightness in Brightness.values) {
+      final theme = hmmmTheme(brightness);
+      final navigation = theme.navigationBarTheme;
+      final selected = {WidgetState.selected};
+      final unselected = <WidgetState>{};
+
+      expect(
+        navigation.iconTheme!.resolve(selected)!.color,
+        theme.colorScheme.onSurface,
+      );
+      expect(
+        navigation.iconTheme!.resolve(unselected)!.color,
+        theme.colorScheme.onSurfaceVariant,
+      );
+      expect(
+        navigation.labelTextStyle!.resolve(selected)!.color,
+        theme.colorScheme.onSurface,
+      );
+      expect(
+        navigation.labelTextStyle!.resolve(unselected)!.color,
+        theme.colorScheme.onSurfaceVariant,
+      );
+    }
+  });
+
   testWidgets('calendar keeps stopped medication history visible', (
     tester,
   ) async {
@@ -500,6 +528,25 @@ void main() {
     expect(await symptoms.listEntries(), isEmpty);
   });
 
+  testWidgets('day sheet shows the severity affordance', (tester) async {
+    await _pumpApp(
+      tester,
+      periods,
+      medications,
+      symptoms,
+      settings,
+      database,
+      today,
+    );
+    await tester.tap(find.byKey(const ValueKey('day-2026-06-10')));
+    await _pumpFrames(tester);
+
+    expect(
+      find.text('tap to set severity 0–3 · hold for note'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('calendar switches from grid to agenda at 1.3 text scale', (
     tester,
   ) async {
@@ -790,6 +837,8 @@ void main() {
 
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
+    await tester.tap(find.text('Records'));
+    await _pumpFrames(tester);
     await tester.tap(find.text('Period records'));
     await _pumpFrames(tester);
     await tester.tap(find.byKey(const ValueKey('add-period')));
@@ -819,6 +868,8 @@ void main() {
     );
 
     await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Records'));
     await _pumpFrames(tester);
     await tester.tap(find.text('Medications'));
     await _pumpFrames(tester);
@@ -857,6 +908,8 @@ void main() {
       today,
     );
     await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Records'));
     await _pumpFrames(tester);
     await tester.tap(find.text('Medications'));
     await _pumpFrames(tester);
@@ -915,6 +968,8 @@ void main() {
       today,
     );
     await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Records'));
     await _pumpFrames(tester);
     await tester.tap(find.text('Medications'));
     await _pumpFrames(tester);
@@ -1033,6 +1088,8 @@ void main() {
 
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
+    await tester.tap(find.text('Records'));
+    await _pumpFrames(tester);
     await tester.tap(find.text('Medications'));
     await _pumpFrames(tester);
     await tester.tap(
@@ -1079,6 +1136,8 @@ void main() {
       today,
     );
     await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Records'));
     await _pumpFrames(tester);
     await tester.tap(find.text('Symptom types'));
     await _pumpFrames(tester);
@@ -1162,6 +1221,8 @@ void main() {
     );
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
+    await tester.tap(find.text('Records'));
+    await _pumpFrames(tester);
     await tester.tap(find.text('Medications'));
     await _pumpFrames(tester);
     await tester.tap(find.byKey(ValueKey('medication-${medication.id}')));
@@ -1182,7 +1243,7 @@ void main() {
     expect((await medications.listMedications()).single.dose, 'two squirts');
   });
 
-  testWidgets('settings record rows show counts and newest state', (
+  testWidgets('settings routes records and exports through subscreens', (
     tester,
   ) async {
     await periods.insert(Period(start: DateTime(2026, 6, 2)), today: today);
@@ -1221,17 +1282,186 @@ void main() {
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
 
-    expect(find.text('RECORDS'), findsOneWidget);
+    expect(find.byKey(const ValueKey('settings-records')), findsOneWidget);
+    expect(find.byKey(const ValueKey('settings-export-print')), findsOneWidget);
+    expect(find.byKey(const ValueKey('settings-theme')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('settings-require-unlock')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('settings-list')),
+        matching: find.byType(ListTile),
+      ),
+      findsNWidgets(4),
+    );
+    expect(find.text('Medications'), findsNothing);
+    expect(find.text('Period records'), findsNothing);
+    expect(find.text('Symptom types'), findsNothing);
+    expect(find.text('Print report'), findsNothing);
+    expect(find.text('Export calendar'), findsNothing);
+    expect(find.text('Export data'), findsNothing);
+    expect(find.text('Import data'), findsNothing);
+    expect(
+      find.text('2 medications · 1 period · 11 symptom types'),
+      findsOneWidget,
+    );
+    expect(find.text('ics · json · pdf'), findsOneWidget);
+    expect(find.text('Theme'), findsOneWidget);
+    expect(find.text('system'), findsOneWidget);
+
+    final semanticsHandle = tester.ensureSemantics();
+    expect(
+      tester.getSemantics(find.byKey(const ValueKey('settings-records'))).label,
+      'Records, 2 medications · 1 period · 11 symptom types',
+    );
+    expect(
+      tester
+          .getSemantics(find.byKey(const ValueKey('settings-export-print')))
+          .label,
+      'Export & print, ics · json · pdf',
+    );
+
+    await tester.tap(find.byKey(const ValueKey('settings-records')));
+    await _pumpFrames(tester);
+    expect(find.byKey(const ValueKey('records-screen')), findsOneWidget);
+    expect(
+      tester.getSemantics(find.text('Records')).flagsCollection.namesRoute,
+      isTrue,
+    );
     expect(find.text('2 · 1 active'), findsOneWidget);
     expect(find.text('1 · newest 2 Jun 2026, open'), findsOneWidget);
     expect(find.text('11 · 1 custom'), findsOneWidget);
+    expect(find.text('Records'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Back'));
+    await _pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('settings-export-print')));
+    await _pumpFrames(tester);
+    expect(find.byKey(const ValueKey('export-print-screen')), findsOneWidget);
+    expect(find.text('Export & print'), findsOneWidget);
+    expect(
+      tester
+          .getSemantics(find.text('Export & print'))
+          .flagsCollection
+          .namesRoute,
+      isTrue,
+    );
     expect(find.text('PDF · choose 1/3/6/12 months'), findsOneWidget);
+    expect(find.text('JSON · replaces everything'), findsOneWidget);
+    expect(
+      tester
+          .widgetList<ListTile>(find.byType(ListTile))
+          .map((tile) => (tile.title as Text).data),
+      ['Print report', 'Export calendar', 'Export data', 'Import data'],
+    );
+    semanticsHandle.dispose();
+  });
+
+  testWidgets('settings import keeps its two-step confirmation', (
+    tester,
+  ) async {
+    final source = await JsonBackupRepository(database)
+        .export(exportedAt: today);
+    await _pumpApp(
+      tester,
+      periods,
+      medications,
+      symptoms,
+      settings,
+      database,
+      today,
+    );
+    await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Export & print'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Import data'));
+    await _pumpFrames(tester);
+
+    expect(find.byKey(const ValueKey('import-json-text')), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('import-json-text')),
+      source,
+    );
+    await tester.tap(find.text('Continue'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Replace all data?'), findsOneWidget);
+    expect(find.byKey(const ValueKey('confirm-import-json')), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await _pumpFrames(tester);
+    expect(find.text('Export & print'), findsOneWidget);
+  });
+
+  testWidgets('dark theme selection persists across an app restart', (
+    tester,
+  ) async {
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+    addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+    await _pumpApp(
+      tester,
+      periods,
+      medications,
+      symptoms,
+      settings,
+      database,
+      today,
+    );
+    await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
     await tester.scrollUntilVisible(
-      find.text('Import data'),
+      find.text('Theme'),
       200,
       scrollable: find.byType(Scrollable).first,
     );
-    expect(find.text('JSON · replaces everything'), findsOneWidget);
+    await tester.tap(find.text('Theme'));
+    await _pumpFrames(tester);
+
+    expect(find.text('System'), findsOneWidget);
+    expect(find.text('follow the device setting'), findsOneWidget);
+    expect(find.text('Light'), findsOneWidget);
+    expect(find.text('always light'), findsOneWidget);
+    expect(find.text('Dark'), findsOneWidget);
+    expect(find.text('always dark'), findsOneWidget);
+    await tester.tap(find.text('Dark'));
+    await _pumpFrames(tester);
+
+    expect(
+      Theme.of(tester.element(find.text('dark'))).brightness,
+      Brightness.dark,
+    );
+    expect(
+      await database.query(
+        'settings',
+        columns: ['value'],
+        where: 'key = ?',
+        whereArgs: ['theme_mode'],
+      ),
+      [
+        {'value': 'dark'},
+      ],
+    );
+
+    final restartedSettings = SettingsRepository(database);
+    addTearDown(restartedSettings.dispose);
+    await restartedSettings.load();
+    await _pumpApp(
+      tester,
+      periods,
+      medications,
+      symptoms,
+      restartedSettings,
+      database,
+      today,
+    );
+
+    expect(restartedSettings.themeMode, AppThemeMode.dark);
+    expect(
+      Theme.of(tester.element(find.byType(NavigationBar))).brightness,
+      Brightness.dark,
+    );
   });
 
   testWidgets(

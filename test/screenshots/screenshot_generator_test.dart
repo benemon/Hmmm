@@ -255,9 +255,27 @@ void main() {
       await capture(tester, '04-settings-$mode');
     });
 
+    testWidgets('settings records $mode', (tester) async {
+      await pumpApp(tester, brightness);
+      await tester.tap(find.text('SETTINGS'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Records'));
+      await capture(tester, '04-records-$mode');
+    });
+
+    testWidgets('settings export and print $mode', (tester) async {
+      await pumpApp(tester, brightness);
+      await tester.tap(find.text('SETTINGS'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Export & print'));
+      await capture(tester, '04-export-print-$mode');
+    });
+
     testWidgets('medications $mode', (tester) async {
       await pumpApp(tester, brightness);
       await tester.tap(find.text('SETTINGS'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Records'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Medications'));
       await capture(tester, '05-medications-$mode');
@@ -266,6 +284,8 @@ void main() {
     testWidgets('interval medication form $mode', (tester) async {
       await pumpApp(tester, brightness);
       await tester.tap(find.text('SETTINGS'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Records'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Medications'));
       await tester.pumpAndSettle();
@@ -279,6 +299,8 @@ void main() {
       await pumpApp(tester, brightness);
       await tester.tap(find.text('SETTINGS'));
       await tester.pumpAndSettle();
+      await tester.tap(find.text('Records'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Period records'));
       await capture(tester, '07-period-records-$mode');
     });
@@ -286,6 +308,8 @@ void main() {
     testWidgets('symptom types $mode', (tester) async {
       await pumpApp(tester, brightness);
       await tester.tap(find.text('SETTINGS'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Records'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Symptom types'));
       await capture(tester, '08-symptom-types-$mode');

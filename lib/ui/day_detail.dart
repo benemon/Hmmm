@@ -318,6 +318,7 @@ class _DayPage extends StatelessWidget {
                   label:
                       'SYMPTOMS  ${entriesByTypeId.length} of '
                       '${data.types.length} recorded',
+                  meta: 'tap to set severity 0–3 · hold for note',
                   child: _SymptomsBlock(
                     date: date,
                     today: today,
@@ -420,11 +421,13 @@ class _SheetBlock extends StatelessWidget {
     required this.semanticsLabel,
     required this.label,
     required this.child,
+    this.meta,
   });
 
   final String semanticsLabel;
   final String label;
   final Widget child;
+  final String? meta;
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -438,6 +441,10 @@ class _SheetBlock extends StatelessWidget {
           ExcludeSemantics(
             child: Text(label, style: Theme.of(context).textTheme.labelSmall),
           ),
+          if (meta != null) ...[
+            const SizedBox(height: Dim.s1),
+            Text(meta!, style: Theme.of(context).textTheme.bodyMedium),
+          ],
           const SizedBox(height: Dim.s3),
           child,
         ],

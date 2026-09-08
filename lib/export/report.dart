@@ -119,7 +119,7 @@ Future<Uint8List> buildReportPdf(ReportData data) async {
 
   document.addPage(
     pw.MultiPage(
-      pageFormat: PdfPageFormat.a4.landscape,
+      pageFormat: PdfPageFormat.a4,
       margin: const pw.EdgeInsets.all(24),
       theme: theme,
       footer: (context) => _footer(context, fonts),
@@ -335,7 +335,7 @@ pw.Widget _monthCell(
       children: [
         pw.Text(
           '$dayNumber',
-          style: pw.TextStyle(font: fonts.monoMedium, fontSize: 8),
+          style: pw.TextStyle(font: fonts.monoMedium, fontSize: 9),
         ),
         pw.SizedBox(height: 2),
         marker.inPeriod
@@ -448,13 +448,13 @@ pw.Widget _cycleDayTable(ReportData data, _ReportFonts fonts) {
     ],
     fonts,
     fontSize: 9,
-    horizontalPadding: 1,
+    horizontalPadding: 0,
     columnWidths: {
-      0: const pw.FixedColumnWidth(150),
-      1: const pw.FixedColumnWidth(38),
+      0: const pw.FixedColumnWidth(86),
+      1: const pw.FixedColumnWidth(27),
       for (var column = 2; column < 37; column++)
-        column: const pw.FixedColumnWidth(16),
-      37: const pw.FixedColumnWidth(46),
+        column: const pw.FixedColumnWidth(11.5),
+      37: const pw.FixedColumnWidth(31),
     },
   );
 }
@@ -480,11 +480,13 @@ pw.Widget _monthlyTable(ReportData data, _ReportFonts fonts) {
         ],
     ],
     fonts,
+    fontSize: 9,
+    horizontalPadding: 1,
     columnWidths: {
-      0: const pw.FixedColumnWidth(150),
-      1: const pw.FixedColumnWidth(38),
+      0: const pw.FixedColumnWidth(92),
+      1: const pw.FixedColumnWidth(24),
       for (var column = 2; column < 14; column++)
-        column: const pw.FixedColumnWidth(40),
+        column: const pw.FixedColumnWidth(35),
     },
   );
 }
