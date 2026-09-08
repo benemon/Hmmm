@@ -5,6 +5,7 @@ import 'package:hmmm/domain/hrt_window.dart';
 import 'package:hmmm/domain/models.dart';
 import 'package:hmmm/domain/trends.dart';
 import 'package:hmmm/export/report.dart';
+import 'package:hmmm/ui/settings.dart';
 import 'package:hmmm/ui/theme.dart';
 import 'package:pdf/pdf.dart';
 
@@ -161,7 +162,10 @@ void main() {
 
       expect(letterhead, contains('15 Jun 26'));
       expect(letterhead, contains('1 Apr 26-15 Jun 26'));
-      expect(letterhead, contains('L1 Progesterone 200 mg'));
+      expect(data.legendEntries, hasLength(1));
+      expect(data.legendEntries.single.label, 'L1');
+      expect(letterhead, isNot(contains('>L1 ')));
+      expect(letterhead, isNot(contains('>L2 ')));
       expect(letterhead, isNot(contains('{{EXPORT_DATE}}')));
       expect(letterhead, isNot(contains('{{RANGE}}')));
       expect(letterhead, isNot(contains('{{MED_1}}')));
@@ -209,6 +213,94 @@ void main() {
     expect(windows.single.start, DateTime(2026, 6, 3));
     expect(await buildReportPdf(data), isNotEmpty);
   });
+
+  test(
+    'single-medication future-course report assembles chunked portrait data',
+    () async {
+      final today = DateTime(2026, 8, 31);
+      final period = Period(start: DateTime(2026, 8, 20));
+      final medication = Medication(
+        id: 1,
+        name: 'Progesterone',
+        dose: '200 mg',
+        schedule: CyclicalMedicationSchedule(
+          startCycleDay: 15,
+          durationDays: 12,
+        ),
+        active: true,
+      );
+      final rangeEnd = latestDerivedWindowEnd(
+        medications: [medication],
+        periods: [period],
+        adjustments: const [],
+        today: today,
+      );
+      final range = rangeForMonths(today, 1, rangeEnd);
+      final windows = deriveAdjustedWindows(
+        medication,
+        [period],
+        range,
+        const [],
+        today: today,
+      );
+      final data = assembleReportData(
+        periods: [period],
+        medications: [medication],
+        symptomTypes: const [
+          SymptomType(id: 1, name: 'migraine', builtin: true),
+        ],
+        symptomEntries: [
+          SymptomEntry(date: DateTime(2026, 8, 19), typeId: 1, severity: 1),
+        ],
+        windowsByMedicationId: {1: windows},
+        range: range,
+        today: today,
+      );
+
+      expect(range.end, DateTime(2026, 9, 14));
+      expect(windows.single.start, DateTime(2026, 9, 3));
+      expect(windows.single.end, DateTime(2026, 9, 14));
+      expect(data.months, [DateTime(2026, 8), DateTime(2026, 9)]);
+      expect(data.legendEntries, hasLength(1));
+      expect(data.legendEntries.single.label, 'L1');
+      expect(
+        data.legendEntries.map((entry) => entry.label),
+        isNot(contains('L2')),
+      );
+      expect(data.cycleDayMatrixChunks, hasLength(3));
+      expect(data.cycleDayMatrixChunks[0].headers, [
+        'symptom',
+        'all',
+        for (var day = 1; day <= 12; day++) '$day',
+      ]);
+      expect(data.cycleDayMatrixChunks[1].headers, [
+        'symptom',
+        for (var day = 13; day <= 24; day++) '$day',
+      ]);
+      expect(data.cycleDayMatrixChunks[2].headers, [
+        'symptom',
+        for (var day = 25; day <= 35; day++) '$day',
+        'no cycle',
+      ]);
+      expect(data.monthlyMatrixChunks, hasLength(2));
+      expect(data.monthlyMatrixChunks.map((chunk) => chunk.headers.length), [
+        8,
+        7,
+      ]);
+      for (final chunk in [
+        ...data.cycleDayMatrixChunks,
+        ...data.monthlyMatrixChunks,
+      ]) {
+        expect(chunk.headers.first, 'symptom');
+        expect(chunk.rows.single.name, 'migraine');
+        expect(chunk.tableWidth, lessThanOrEqualTo(reportPortraitContentWidth));
+      }
+
+      final bytes = await buildReportPdf(data);
+      expect(bytes, isNotEmpty);
+      expect(String.fromCharCodes(bytes.take(4)), '%PDF');
+    },
+  );
 }
 
 List<Object> _cycleDayValues(List<SymptomCycleDayCounts> rows) => [

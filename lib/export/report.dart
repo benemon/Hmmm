@@ -12,6 +12,41 @@ import '../domain/trends.dart';
 import '../ui/format.dart';
 import '../ui/theme.dart';
 
+class ReportLegendEntry {
+  const ReportLegendEntry({required this.medication, required this.laneIndex});
+
+  final Medication medication;
+  final int laneIndex;
+
+  String get label => Markers.print.lane(laneIndex).label;
+}
+
+class ReportMatrixRow {
+  const ReportMatrixRow({
+    required this.typeId,
+    required this.name,
+    required this.values,
+  });
+
+  final int typeId;
+  final String name;
+  final List<String> values;
+}
+
+class ReportMatrixChunk {
+  const ReportMatrixChunk({
+    required this.headers,
+    required this.columnWidths,
+    required this.rows,
+  });
+
+  final List<String> headers;
+  final List<double> columnWidths;
+  final List<ReportMatrixRow> rows;
+
+  double get tableWidth => columnWidths.fold(0, (sum, width) => sum + width);
+}
+
 class ReportData {
   const ReportData({
     required this.range,
@@ -26,6 +61,9 @@ class ReportData {
     required this.cycleSummaries,
     required this.symptomCycleDayCounts,
     required this.monthlySymptomCounts,
+    required this.legendEntries,
+    required this.cycleDayMatrixChunks,
+    required this.monthlyMatrixChunks,
     this.windowAdjustments = const [],
   });
 
@@ -42,6 +80,9 @@ class ReportData {
   final List<CycleLengthSummary> cycleSummaries;
   final List<SymptomCycleDayCounts> symptomCycleDayCounts;
   final MonthlySymptomCounts monthlySymptomCounts;
+  final List<ReportLegendEntry> legendEntries;
+  final List<ReportMatrixChunk> cycleDayMatrixChunks;
+  final List<ReportMatrixChunk> monthlyMatrixChunks;
 }
 
 ReportData assembleReportData({
@@ -61,6 +102,17 @@ ReportData assembleReportData({
       lastMonth.month -
       firstMonth.month +
       1;
+  final symptomCycleDayCounts = symptomCountsByCycleDay(
+    symptomEntries,
+    periods,
+  );
+  final monthlySymptomCounts = symptomCountsByMonth(symptomEntries, today);
+  final medicationsWithWindows = [
+    for (final medication in medications)
+      if (medicationHasDerivableWindows(medication, periods, today: today))
+        medication,
+  ]..sort((left, right) => left.id!.compareTo(right.id!));
+  final lanes = laneAssignments(medicationsWithWindows);
   return ReportData(
     range: range,
     today: dateOnly(today),
@@ -76,8 +128,23 @@ ReportData assembleReportData({
     ],
     cycleLengths: cycleLengthsToNext(periods),
     cycleSummaries: cycleLengthSummaries(periods, today),
-    symptomCycleDayCounts: symptomCountsByCycleDay(symptomEntries, periods),
-    monthlySymptomCounts: symptomCountsByMonth(symptomEntries, today),
+    symptomCycleDayCounts: symptomCycleDayCounts,
+    monthlySymptomCounts: monthlySymptomCounts,
+    legendEntries: [
+      for (final medication in medicationsWithWindows)
+        ReportLegendEntry(
+          medication: medication,
+          laneIndex: lanes[medication.id!]!,
+        ),
+    ],
+    cycleDayMatrixChunks: _cycleDayMatrixChunks(
+      symptomTypes,
+      symptomCycleDayCounts,
+    ),
+    monthlyMatrixChunks: _monthlyMatrixChunks(
+      symptomTypes,
+      monthlySymptomCounts,
+    ),
   );
 }
 
@@ -98,7 +165,7 @@ Future<Uint8List> buildReportPdf(ReportData data) async {
       theme: theme,
       footer: (context) => _footer(context, fonts),
       build: (context) => [
-        _reportHeader(letterhead, fonts),
+        _reportHeader(letterhead, data.legendEntries, fonts),
         pw.SizedBox(height: 14),
         for (final month in data.months.reversed) ...[
           _monthGrid(data, month, fonts),
@@ -131,7 +198,7 @@ Future<Uint8List> buildReportPdf(ReportData data) async {
               '${data.symptomCycleDayCounts.length} of ${data.symptomTypes.length} types',
           fonts,
         ),
-        _cycleDayTable(data, fonts),
+        ..._matrixTables(data.cycleDayMatrixChunks, fonts),
         pw.SizedBox(height: 14),
         _sectionHeading(
           'Monthly counts',
@@ -139,7 +206,7 @@ Future<Uint8List> buildReportPdf(ReportData data) async {
               'to ${monthsShort[data.today.month - 1]} ${data.today.year}',
           fonts,
         ),
-        _monthlyTable(data, fonts),
+        ..._matrixTables(data.monthlyMatrixChunks, fonts),
         pw.SizedBox(height: 14),
         _sectionHeading(
           'Medication courses',
@@ -184,49 +251,81 @@ String reportLetterheadSvg({
   required ReportData data,
   required String template,
 }) {
-  final medicationLabels = [
-    for (final medication in data.medications.take(2))
-      '${medication.name} ${medication.dose}',
-  ];
   return template
+      .replaceFirst(RegExp(r'\s*<g font-family="DM Mono,[\s\S]*?</g>'), '')
+      .replaceFirst(
+        'height="86" viewBox="0 0 547 86"',
+        'height="44" viewBox="0 0 547 44"',
+      )
       .replaceAll('{{EXPORT_DATE}}', _letterheadDate(data.today))
       .replaceAll(
         '{{RANGE}}',
         '${_letterheadDate(data.range.start)}-'
             '${_letterheadDate(data.range.end)}',
       )
-      .replaceAll(
-        '{{MED_1}}',
-        medicationLabels.isEmpty ? '' : _escapeSvgText(medicationLabels[0]),
-      )
-      .replaceAll(
-        '{{MED_2}}',
-        medicationLabels.length < 2 ? '' : _escapeSvgText(medicationLabels[1]),
-      )
-      .replaceFirst('font-size="10"', 'font-size="9"');
+      .replaceAll('{{MED_1}}', '')
+      .replaceAll('{{MED_2}}', '')
+      .replaceFirst('font-size="11"', 'font-size="9"');
 }
 
 String _letterheadDate(DateTime date) =>
     '${date.day} ${monthsShort[date.month - 1]} '
     '${(date.year % 100).toString().padLeft(2, '0')}';
 
-String _escapeSvgText(String value) => value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
-
-pw.Widget _reportHeader(String letterhead, _ReportFonts fonts) => pw.SvgImage(
-  svg: letterhead,
-  customFontLookup: (family, style, weight) {
-    if (family.contains('DM Mono')) {
-      return weight == '600' ? fonts.monoMedium : fonts.mono;
-    }
-    if (family.contains('Public Sans')) {
-      return weight == '600' ? fonts.sansBold : fonts.sans;
-    }
-    return null;
-  },
+pw.Widget _reportHeader(
+  String letterhead,
+  List<ReportLegendEntry> legendEntries,
+  _ReportFonts fonts,
+) => pw.Column(
+  crossAxisAlignment: pw.CrossAxisAlignment.start,
+  children: [
+    pw.SvgImage(
+      svg: letterhead,
+      customFontLookup: (family, style, weight) {
+        if (family.contains('DM Mono')) {
+          return weight == '600' ? fonts.monoMedium : fonts.mono;
+        }
+        if (family.contains('Public Sans')) {
+          return weight == '600' ? fonts.sansBold : fonts.sans;
+        }
+        return null;
+      },
+    ),
+    pw.SizedBox(height: 7),
+    pw.Wrap(
+      spacing: 12,
+      runSpacing: 6,
+      children: [
+        _legendItem(
+          _textureBand(MarkerTexture.solid, width: 20, height: 5),
+          'period',
+          fonts,
+        ),
+        for (final entry in legendEntries)
+          _legendItem(
+            _textureBand(
+              Markers.print.lane(entry.laneIndex).texture,
+              width: 20,
+              height: 3,
+            ),
+            '${entry.label} ${entry.medication.name} ${entry.medication.dose}',
+            fonts,
+          ),
+        _legendItem(_symptomGlyph(1), 'shapes', fonts),
+      ],
+    ),
+  ],
 );
+
+pw.Widget _legendItem(pw.Widget marker, String label, _ReportFonts fonts) =>
+    pw.Row(
+      mainAxisSize: pw.MainAxisSize.min,
+      children: [
+        marker,
+        pw.SizedBox(width: 6),
+        pw.Text(label, style: pw.TextStyle(font: fonts.mono, fontSize: 9)),
+      ],
+    );
 
 pw.Widget _footer(pw.Context context, _ReportFonts fonts) => pw.Container(
   padding: const pw.EdgeInsets.only(top: 6),
@@ -251,7 +350,10 @@ pw.Widget _footer(pw.Context context, _ReportFonts fonts) => pw.Container(
 pw.Widget _monthGrid(ReportData data, DateTime month, _ReportFonts fonts) {
   final firstOffset = month.weekday - DateTime.monday;
   final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
-  final lanes = laneAssignments(data.medications);
+  final lanes = {
+    for (final entry in data.legendEntries)
+      entry.medication.id!: entry.laneIndex,
+  };
   final rows = <pw.TableRow>[
     pw.TableRow(
       repeat: true,
@@ -310,11 +412,11 @@ pw.Widget _monthCell(
   _ReportFonts fonts,
 ) {
   if (dayNumber < 1 || dayNumber > daysInMonth) {
-    return pw.SizedBox(height: _monthCellHeight(data.medications.length));
+    return pw.SizedBox(height: _monthCellHeight(data.legendEntries.length));
   }
   final date = DateTime(month.year, month.month, dayNumber);
   if (date.isBefore(data.range.start) || date.isAfter(data.range.end)) {
-    return pw.SizedBox(height: _monthCellHeight(data.medications.length));
+    return pw.SizedBox(height: _monthCellHeight(data.legendEntries.length));
   }
   final marker = buildDayCellMarkerData(
     date: date,
@@ -325,7 +427,7 @@ pw.Widget _monthCell(
     entries: data.symptomEntries,
   );
   return pw.Container(
-    height: _monthCellHeight(data.medications.length),
+    height: _monthCellHeight(data.legendEntries.length),
     padding: const pw.EdgeInsets.all(2),
     decoration: date == data.today
         ? pw.BoxDecoration(border: pw.Border.all(width: 1.2))
@@ -342,7 +444,7 @@ pw.Widget _monthCell(
             ? _textureBand(MarkerTexture.solid, width: 40, height: 4)
             : pw.SizedBox(height: 4),
         pw.SizedBox(height: 2),
-        for (var lane = 0; lane < data.medications.length; lane++) ...[
+        for (var lane = 0; lane < data.legendEntries.length; lane++) ...[
           marker.medicationMarkers.any((item) => item.laneIndex == lane)
               ? _textureBand(
                   Markers.print.lane(lane).texture,
@@ -427,69 +529,155 @@ pw.Widget _cycleSummaryTable(ReportData data, _ReportFonts fonts) =>
               ],
     ], fonts);
 
-pw.Widget _cycleDayTable(ReportData data, _ReportFonts fonts) {
-  final types = {for (final type in data.symptomTypes) type.id!: type.name};
-  return _textTable(
-    [
-      [
-        'symptom',
-        'all',
-        for (var day = 1; day <= 35; day++) '$day',
-        'no cycle',
-      ],
-      for (final row in data.symptomCycleDayCounts)
-        [
-          types[row.typeId] ?? '',
-          '${row.totalCount}',
-          for (var day = 1; day <= 35; day++)
-            _printCount(row.countsByCycleDay[day] ?? 0),
-          _printCount(row.noCycleCount),
+List<ReportMatrixChunk> _cycleDayMatrixChunks(
+  List<SymptomType> symptomTypes,
+  List<SymptomCycleDayCounts> counts,
+) {
+  final names = {for (final type in symptomTypes) type.id!: type.name};
+  return [
+    for (final (start, end, includeAll, includeNoCycle) in const [
+      (1, 12, true, false),
+      (13, 24, false, false),
+      (25, 35, false, true),
+    ])
+      ReportMatrixChunk(
+        headers: [
+          'symptom',
+          if (includeAll) 'all',
+          for (var day = start; day <= end; day++) '$day',
+          if (includeNoCycle) 'no cycle',
         ],
-    ],
-    fonts,
-    fontSize: 9,
-    horizontalPadding: 0,
-    columnWidths: {
-      0: const pw.FixedColumnWidth(86),
-      1: const pw.FixedColumnWidth(27),
-      for (var column = 2; column < 37; column++)
-        column: const pw.FixedColumnWidth(11.5),
-      37: const pw.FixedColumnWidth(31),
-    },
-  );
+        columnWidths: [
+          _matrixNameWidth,
+          if (includeAll) _matrixAllWidth,
+          for (var day = start; day <= end; day++) _cycleDayWidth,
+          if (includeNoCycle) _noCycleWidth,
+        ],
+        rows: [
+          for (final row in counts)
+            ReportMatrixRow(
+              typeId: row.typeId,
+              name: names[row.typeId] ?? '',
+              values: [
+                if (includeAll) '${row.totalCount}',
+                for (var day = start; day <= end; day++)
+                  _printCount(row.countsByCycleDay[day] ?? 0),
+                if (includeNoCycle) _printCount(row.noCycleCount),
+              ],
+            ),
+        ],
+      ),
+  ];
 }
 
-pw.Widget _monthlyTable(ReportData data, _ReportFonts fonts) {
-  final result = data.monthlySymptomCounts;
-  final types = {for (final type in data.symptomTypes) type.id!: type.name};
+List<ReportMatrixChunk> _monthlyMatrixChunks(
+  List<SymptomType> symptomTypes,
+  MonthlySymptomCounts result,
+) {
+  final names = {for (final type in symptomTypes) type.id!: type.name};
   final typeIds = result.countsByTypeId.keys.toList()..sort();
-  return _textTable(
-    [
-      [
-        'symptom',
-        'all',
-        for (final month in result.months)
-          '${month.month}/${(month.year % 100).toString().padLeft(2, '0')}',
-      ],
-      for (final typeId in typeIds)
-        [
-          types[typeId] ?? '',
-          '${result.countsByTypeId[typeId]!.fold<int>(0, (sum, value) => sum + value)}',
-          for (final count in result.countsByTypeId[typeId]!)
-            _printCount(count),
+  return [
+    for (final (start, end, includeAll) in const [(0, 6, true), (6, 12, false)])
+      ReportMatrixChunk(
+        headers: [
+          'symptom',
+          if (includeAll) 'all',
+          for (final month in result.months.sublist(start, end))
+            '${month.month}/${(month.year % 100).toString().padLeft(2, '0')}',
         ],
-    ],
-    fonts,
-    fontSize: 9,
-    horizontalPadding: 1,
-    columnWidths: {
-      0: const pw.FixedColumnWidth(92),
-      1: const pw.FixedColumnWidth(24),
-      for (var column = 2; column < 14; column++)
-        column: const pw.FixedColumnWidth(35),
-    },
-  );
+        columnWidths: [
+          _matrixNameWidth,
+          if (includeAll) _matrixAllWidth,
+          for (var month = start; month < end; month++) _monthWidth,
+        ],
+        rows: [
+          for (final typeId in typeIds)
+            ReportMatrixRow(
+              typeId: typeId,
+              name: names[typeId] ?? '',
+              values: [
+                if (includeAll)
+                  '${result.countsByTypeId[typeId]!.fold<int>(0, (sum, value) => sum + value)}',
+                for (final count in result.countsByTypeId[typeId]!.sublist(
+                  start,
+                  end,
+                ))
+                  _printCount(count),
+              ],
+            ),
+        ],
+      ),
+  ];
 }
+
+List<pw.Widget> _matrixTables(
+  List<ReportMatrixChunk> chunks,
+  _ReportFonts fonts,
+) => [
+  for (final chunk in chunks.indexed) ...[
+    if (chunk.$1 > 0) pw.SizedBox(height: 7),
+    pw.Table(
+      border: pw.TableBorder(
+        top: const pw.BorderSide(color: _rule, width: 0.5),
+        bottom: const pw.BorderSide(color: _rule, width: 0.5),
+        horizontalInside: const pw.BorderSide(color: _rule, width: 0.5),
+      ),
+      columnWidths: {
+        for (final width in chunk.$2.columnWidths.indexed)
+          width.$1: pw.FixedColumnWidth(width.$2),
+      },
+      children: [
+        pw.TableRow(
+          repeat: true,
+          children: [
+            for (final header in chunk.$2.headers.indexed)
+              _matrixCell(
+                pw.Text(
+                  header.$2,
+                  textAlign: header.$1 == 0
+                      ? pw.TextAlign.left
+                      : pw.TextAlign.right,
+                  style: pw.TextStyle(font: fonts.monoMedium, fontSize: 9),
+                ),
+              ),
+          ],
+        ),
+        for (final row in chunk.$2.rows)
+          pw.TableRow(
+            children: [
+              _matrixCell(
+                pw.Row(
+                  children: [
+                    _symptomGlyph(row.typeId),
+                    pw.SizedBox(width: 5),
+                    pw.Expanded(
+                      child: pw.Text(
+                        row.name,
+                        style: pw.TextStyle(font: fonts.sans, fontSize: 9),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              for (final value in row.values)
+                _matrixCell(
+                  pw.Text(
+                    value,
+                    textAlign: pw.TextAlign.right,
+                    style: pw.TextStyle(font: fonts.mono, fontSize: 9),
+                  ),
+                ),
+            ],
+          ),
+      ],
+    ),
+  ],
+];
+
+pw.Widget _matrixCell(pw.Widget child) => pw.Padding(
+  padding: const pw.EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+  child: child,
+);
 
 pw.Widget _textTable(
   List<List<String>> rows,
@@ -532,7 +720,6 @@ pw.Widget _textTable(
 );
 
 pw.Widget _medicationCourses(ReportData data, _ReportFonts fonts) {
-  final lanes = laneAssignments(data.medications);
   final adjustmentsByMedication = <int, List<WindowAdjustment>>{};
   for (final adjustment in data.windowAdjustments) {
     adjustmentsByMedication
@@ -542,49 +729,49 @@ pw.Widget _medicationCourses(ReportData data, _ReportFonts fonts) {
   return pw.Column(
     crossAxisAlignment: pw.CrossAxisAlignment.start,
     children: [
-      for (final medication in data.medications) ...[
+      for (final legendEntry in data.legendEntries) ...[
         pw.Row(
           children: [
             _textureBand(
-              Markers.print.lane(lanes[medication.id!]!).texture,
+              Markers.print.lane(legendEntry.laneIndex).texture,
               width: 20,
               height: 4,
             ),
             pw.SizedBox(width: 6),
             pw.Text(
-              '${Markers.print.lane(lanes[medication.id!]!).label} '
-              '${medication.name} · ${medication.dose} · '
-              '${_scheduleText(medication.schedule)}',
+              '${legendEntry.label} ${legendEntry.medication.name} · '
+              '${legendEntry.medication.dose} · '
+              '${_scheduleText(legendEntry.medication.schedule)}',
               style: pw.TextStyle(font: fonts.mono, fontSize: 10),
             ),
           ],
         ),
         pw.SizedBox(height: 3),
         for (final window
-            in data.windowsByMedicationId[medication.id!] ??
+            in data.windowsByMedicationId[legendEntry.medication.id!] ??
                 const <MedicationWindow>[])
           pw.Padding(
             padding: const pw.EdgeInsets.only(left: 26, bottom: 2),
             child: pw.Text(
               '${window.sourcePeriodStart == null
                   ? 'continuous'
-                  : medication.schedule is FixedIntervalMedicationSchedule
+                  : legendEntry.medication.schedule is FixedIntervalMedicationSchedule
                   ? '${formatDate(window.sourcePeriodStart!)} interval'
                   : '${formatDate(window.sourcePeriodStart!)} cycle'} · '
               '${formatDate(window.start)} - ${formatDate(window.end)}'
-              '${_adjustmentSuffix(data.windowAdjustments, medication.id!, window.sourcePeriodStart)}',
+              '${_adjustmentSuffix(data.windowAdjustments, legendEntry.medication.id!, window.sourcePeriodStart)}',
               style: pw.TextStyle(font: fonts.mono, fontSize: 9),
             ),
           ),
         for (final adjustment
-            in adjustmentsByMedication[medication.id!] ??
+            in adjustmentsByMedication[legendEntry.medication.id!] ??
                 const <WindowAdjustment>[])
           if (adjustment.kind == WindowAdjustmentKind.skipped)
             pw.Padding(
               padding: const pw.EdgeInsets.only(left: 26, bottom: 2),
               child: pw.Text(
                 '${formatDate(adjustment.sourcePeriodStart)} '
-                '${medication.schedule is FixedIntervalMedicationSchedule ? 'interval' : 'cycle'} · skipped',
+                '${legendEntry.medication.schedule is FixedIntervalMedicationSchedule ? 'interval' : 'cycle'} · skipped',
                 style: pw.TextStyle(font: fonts.mono, fontSize: 9),
               ),
             ),
@@ -720,3 +907,10 @@ double _monthCellHeight(int medicationCount) =>
     45 + (medicationCount > 4 ? medicationCount - 4 : 0) * 4;
 
 const _rule = PdfColor.fromInt(0xffb3b3b3);
+const _matrixNameWidth = 150.0;
+const _matrixAllWidth = 35.0;
+const _cycleDayWidth = 27.0;
+const _noCycleWidth = 55.0;
+const _monthWidth = 52.0;
+
+double get reportPortraitContentWidth => PdfPageFormat.a4.width - 48;

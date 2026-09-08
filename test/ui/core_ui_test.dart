@@ -975,9 +975,21 @@ void main() {
     await _pumpFrames(tester);
 
     expect(
-      find.text('200 mg · 12 days every 28 days from 4 Mar 2026'),
+      find.text(
+        '200 mg · calendar lane L1 · 12 days every 28 days from 4 Mar 2026',
+      ),
       findsOneWidget,
     );
+    final laneSemantics = tester.ensureSemantics();
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(ValueKey('medication-lane-${medication.id}')),
+          )
+          .label,
+      'calendar lane 1',
+    );
+    laneSemantics.dispose();
     await tester.tap(find.byKey(ValueKey('medication-${medication.id}')));
     await _pumpFrames(tester);
 
@@ -1020,6 +1032,44 @@ void main() {
     expect(find.text('DURATION (DAYS)'), findsOneWidget);
     expect(tester.takeException(), isNull);
     semanticsHandle.dispose();
+  });
+
+  testWidgets('medication without a derivable window has no calendar lane', (
+    tester,
+  ) async {
+    final medication = await medications.insert(
+      Medication(
+        name: 'Progesterone',
+        dose: '200 mg',
+        schedule: CyclicalMedicationSchedule(
+          startCycleDay: 15,
+          durationDays: 12,
+        ),
+        active: true,
+      ),
+    );
+    await _pumpApp(
+      tester,
+      periods,
+      medications,
+      symptoms,
+      settings,
+      database,
+      today,
+    );
+    await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Records'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Medications'));
+    await _pumpFrames(tester);
+
+    expect(find.text('200 mg · cycle day 15, 12 days'), findsOneWidget);
+    expect(find.textContaining('calendar lane'), findsNothing);
+    expect(
+      find.byKey(ValueKey('medication-lane-${medication.id}')),
+      findsNothing,
+    );
   });
 
   testWidgets('day sheet states fixed-interval course number and basis', (
@@ -1393,6 +1443,44 @@ void main() {
     await tester.tap(find.text('Cancel'));
     await _pumpFrames(tester);
     expect(find.text('Export & print'), findsOneWidget);
+  });
+
+  testWidgets('export range descriptions include a future derived course', (
+    tester,
+  ) async {
+    await periods.insert(Period(start: DateTime(2026, 6, 2)), today: today);
+    await medications.insert(
+      Medication(
+        name: 'Progesterone',
+        dose: '200 mg',
+        schedule: CyclicalMedicationSchedule(
+          startCycleDay: 15,
+          durationDays: 12,
+        ),
+        active: true,
+      ),
+    );
+    await _pumpApp(
+      tester,
+      periods,
+      medications,
+      symptoms,
+      settings,
+      database,
+      today,
+    );
+
+    await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Export & print'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Export calendar'));
+    await _pumpFrames(tester);
+
+    expect(find.text('1 Jun 2026 – 27 Jun 2026'), findsOneWidget);
+    expect(find.text('1 Apr 2026 – 27 Jun 2026'), findsOneWidget);
+    expect(find.text('1 Jan 2026 – 27 Jun 2026'), findsOneWidget);
+    expect(find.text('1 Jul 2025 – 27 Jun 2026'), findsOneWidget);
   });
 
   testWidgets('dark theme selection persists across an app restart', (

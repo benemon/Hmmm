@@ -4,6 +4,7 @@ import 'package:hmmm/data/medication_repository.dart';
 import 'package:hmmm/domain/hrt_window.dart';
 import 'package:hmmm/domain/models.dart';
 import 'package:hmmm/export/ics.dart';
+import 'package:hmmm/ui/settings.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -269,5 +270,45 @@ void main() {
     expect(output, contains('DTSTART;VALUE=DATE:20260403'));
     repository.dispose();
     await database.close();
+  });
+
+  test('effective export range includes a course starting after today', () {
+    final today = DateTime(2026, 6, 15);
+    final period = Period(start: DateTime(2026, 6, 2));
+    final medication = Medication(
+      id: 1,
+      name: 'Progesterone',
+      dose: '200 mg',
+      schedule: CyclicalMedicationSchedule(startCycleDay: 15, durationDays: 12),
+      active: true,
+    );
+    final rangeEnd = latestDerivedWindowEnd(
+      medications: [medication],
+      periods: [period],
+      adjustments: const [],
+      today: today,
+    );
+    final range = rangeForMonths(today, 1, rangeEnd);
+    final windows = deriveAdjustedWindows(
+      medication,
+      [period],
+      range,
+      const [],
+      today: today,
+    );
+
+    final output = buildIcs(
+      periods: [period],
+      windowsByMedication: [
+        IcsMedicationWindows(name: medication.name, windows: windows),
+      ],
+      symptomDaysByType: const [],
+      range: range,
+      exportedAt: today,
+    );
+
+    expect(range.end, DateTime(2026, 6, 27));
+    expect(output, contains('DTSTART;VALUE=DATE:20260616'));
+    expect(output, contains('DTEND;VALUE=DATE:20260628'));
   });
 }

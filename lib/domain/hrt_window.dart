@@ -207,6 +207,33 @@ bool medicationHasDerivableWindows(
   );
 }
 
+DateTime latestDerivedWindowEnd({
+  required List<Medication> medications,
+  required List<Period> periods,
+  required List<WindowAdjustment> adjustments,
+  required DateTime today,
+}) {
+  var latest = dateOnly(today);
+  final derivationRange = DateRange(
+    start: DateTime(1, 1, 1),
+    end: DateTime(9999, 12, 31),
+  );
+  for (final medication in medications) {
+    for (final window in deriveAdjustedWindows(
+      medication,
+      periods,
+      derivationRange,
+      adjustments,
+      today: today,
+    )) {
+      if (window.sourcePeriodStart != null && window.end.isAfter(latest)) {
+        latest = window.end;
+      }
+    }
+  }
+  return latest;
+}
+
 DateTime? previousAdjustedCourseStart({
   required int medicationId,
   required DateTime sourcePeriodStart,

@@ -150,32 +150,29 @@ class _MedicationTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lane = laneIndex;
+    final laneMarker = lane == null ? null : Markers.of(context).lane(lane);
     return ListTile(
       key: ValueKey('medication-${medication.id}'),
       leading: lane == null
           ? null
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
+          : Semantics(
+              key: ValueKey('medication-lane-${medication.id}'),
+              container: true,
+              label: 'calendar lane ${lane + 1}',
+              child: ExcludeSemantics(
+                child: SizedBox(
                   width: 20,
                   child: MarkerBand(
-                    color: Markers.of(context).lane(lane).color,
+                    color: laneMarker!.color,
                     height: Dim.laneBandHeight,
-                    texture: Markers.of(context).lane(lane).texture,
+                    texture: laneMarker.texture,
                   ),
                 ),
-                const SizedBox(width: Dim.s1),
-                Text(
-                  Markers.of(context).lane(lane).label,
-                  style: Theme.of(context).textTheme.labelSmall
-                      ?.copyWith(letterSpacing: 0),
-                ),
-              ],
+              ),
             ),
       title: Text(medication.name, style: HmmmType.of(context).bodyStrong),
       subtitle: Text(
-        _medicationFacts(medication),
+        _medicationFacts(medication, laneMarker?.label),
         style: HmmmType.of(context).figureSmall
             .copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
@@ -915,9 +912,10 @@ Medication _resumedMedication(Medication medication) {
   );
 }
 
-String _medicationFacts(Medication medication) {
+String _medicationFacts(Medication medication, String? laneLabel) {
   final schedule = medication.schedule;
   final facts = [medication.dose];
+  if (laneLabel != null) facts.add('calendar lane $laneLabel');
   if (schedule is CyclicalMedicationSchedule) {
     facts.add(
       'cycle day ${schedule.startCycleDay}, ${schedule.durationDays} days',

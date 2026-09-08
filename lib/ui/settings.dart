@@ -124,38 +124,28 @@ class SettingsScreen extends StatelessWidget {
   }
 
   Future<void> _exportCalendar(BuildContext context) async {
-    final months = await _chooseRange(context, today);
-    if (months == null || !context.mounted) return;
-    final data = await _loadData();
-    if (!context.mounted) return;
-    final range = rangeForMonths(today, months);
-    final windows = await medicationRepository.loadAdjustedWindows(
-      medications: data.medications,
-      periods: data.periods,
-      range: range,
-      today: today,
-    );
-    if (!context.mounted) return;
+    final export = await _chooseExport(context);
+    if (export == null || !context.mounted) return;
     final text = buildIcs(
-      periods: data.periods,
+      periods: export.source.periods,
       windowsByMedication: [
-        for (final medication in data.medications)
+        for (final medication in export.source.medications)
           IcsMedicationWindows(
             name: medication.name,
-            windows: windows.windowsByMedicationId[medication.id!]!,
+            windows: export.windowsByMedicationId[medication.id!]!,
           ),
       ],
       symptomDaysByType: [
-        for (final type in data.symptomTypes)
+        for (final type in export.source.symptomTypes)
           IcsSymptomDays(
             name: type.name,
-            dates: data.symptomEntries
+            dates: export.source.symptomEntries
                 .where((entry) => entry.typeId == type.id)
                 .map((entry) => entry.date)
                 .toList(),
           ),
       ],
-      range: range,
+      range: export.range,
       exportedAt: today,
     );
     await _shareTextFile(
@@ -253,28 +243,50 @@ class SettingsScreen extends StatelessWidget {
   }
 
   Future<void> _printReport(BuildContext context) async {
-    final months = await _chooseRange(context, today);
-    if (months == null) return;
-    final source = await _loadData();
-    final range = rangeForMonths(today, months);
-    final windows = await medicationRepository.loadAdjustedWindows(
-      medications: source.medications,
-      periods: source.periods,
-      range: range,
-      today: today,
-    );
+    final export = await _chooseExport(context);
+    if (export == null) return;
     final data = assembleReportData(
-      periods: source.periods,
-      medications: source.medications,
-      symptomTypes: source.symptomTypes,
-      symptomEntries: source.symptomEntries,
-      windowsByMedicationId: windows.windowsByMedicationId,
-      windowAdjustments: windows.adjustments,
-      range: range,
+      periods: export.source.periods,
+      medications: export.source.medications,
+      symptomTypes: export.source.symptomTypes,
+      symptomEntries: export.source.symptomEntries,
+      windowsByMedicationId: export.windowsByMedicationId,
+      windowAdjustments: export.adjustments,
+      range: export.range,
       today: today,
     );
     final bytes = await buildReportPdf(data);
     await Printing.sharePdf(bytes: bytes, filename: 'hmmm-report.pdf');
+  }
+
+  Future<_ExportData?> _chooseExport(BuildContext context) async {
+    final source = await _loadData();
+    final adjustments = await medicationRepository.listAdjustments();
+    final rangeEnd = latestDerivedWindowEnd(
+      medications: source.medications,
+      periods: source.periods,
+      adjustments: adjustments,
+      today: today,
+    );
+    if (!context.mounted) return null;
+    final months = await _chooseRange(context, today, rangeEnd);
+    if (months == null) return null;
+    final range = rangeForMonths(today, months, rangeEnd);
+    return _ExportData(
+      source: source,
+      adjustments: adjustments,
+      range: range,
+      windowsByMedicationId: {
+        for (final medication in source.medications)
+          medication.id!: deriveAdjustedWindows(
+            medication,
+            source.periods,
+            range,
+            adjustments,
+            today: today,
+          ),
+      },
+    );
   }
 
   Future<void> _setRequireUnlock(BuildContext context, bool value) async {
@@ -519,36 +531,39 @@ class _RequireUnlockRow extends StatelessWidget {
   }
 }
 
-Future<int?> _chooseRange(BuildContext context, DateTime today) =>
-    showDialog<int>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Range'),
-        contentPadding: const EdgeInsets.symmetric(vertical: Dim.s2),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final months in const [1, 3, 6, 12])
-              ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: Dim.minTarget),
-                child: ListTile(
-                  title: Text(
-                    '$months ${months == 1 ? 'month' : 'months'}',
-                    style: HmmmType.of(context).figureSmall,
-                  ),
-                  subtitle: Text(
-                    _rangeDescription(rangeForMonths(today, months)),
-                    style: HmmmType.of(context).figureSmall.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  onTap: () => Navigator.pop(context, months),
+Future<int?> _chooseRange(
+  BuildContext context,
+  DateTime today,
+  DateTime rangeEnd,
+) => showDialog<int>(
+  context: context,
+  builder: (context) => AlertDialog(
+    title: const Text('Range'),
+    contentPadding: const EdgeInsets.symmetric(vertical: Dim.s2),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final months in const [1, 3, 6, 12])
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: Dim.minTarget),
+            child: ListTile(
+              title: Text(
+                '$months ${months == 1 ? 'month' : 'months'}',
+                style: HmmmType.of(context).figureSmall,
+              ),
+              subtitle: Text(
+                _rangeDescription(rangeForMonths(today, months, rangeEnd)),
+                style: HmmmType.of(context).figureSmall.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-          ],
-        ),
-      ),
-    );
+              onTap: () => Navigator.pop(context, months),
+            ),
+          ),
+      ],
+    ),
+  ),
+);
 
 Future<AppThemeMode?> _chooseThemeMode(BuildContext context) =>
     showDialog<AppThemeMode>(
@@ -580,10 +595,11 @@ Future<AppThemeMode?> _chooseThemeMode(BuildContext context) =>
       ),
     );
 
-DateRange rangeForMonths(DateTime today, int months) => DateRange(
-  start: DateTime(today.year, today.month - months + 1),
-  end: today,
-);
+DateRange rangeForMonths(DateTime today, int months, DateTime rangeEnd) =>
+    DateRange(
+      start: DateTime(today.year, today.month - months + 1),
+      end: rangeEnd.isAfter(today) ? rangeEnd : today,
+    );
 
 String _rangeDescription(DateRange range) =>
     '${formatDate(range.start)} – ${formatDate(range.end)}';
@@ -632,4 +648,18 @@ class _SettingsData {
   final List<Medication> medications;
   final List<SymptomType> symptomTypes;
   final List<SymptomEntry> symptomEntries;
+}
+
+class _ExportData {
+  const _ExportData({
+    required this.source,
+    required this.adjustments,
+    required this.range,
+    required this.windowsByMedicationId,
+  });
+
+  final _SettingsData source;
+  final List<WindowAdjustment> adjustments;
+  final DateRange range;
+  final Map<int, List<MedicationWindow>> windowsByMedicationId;
 }
