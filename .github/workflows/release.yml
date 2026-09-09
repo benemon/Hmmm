@@ -32,10 +32,11 @@ jobs:
           test -f "$manifest"
           ! grep -q 'android.permission.INTERNET' "$manifest"
           grep -q 'android:allowBackup="false"' "$manifest"
-      - name: Publish release with the APK attached
+      - name: Publish release with the APKs attached
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           version="${GITHUB_REF_NAME#v}"
           out=dist
           gh release create "$GITHUB_REF_NAME" \
