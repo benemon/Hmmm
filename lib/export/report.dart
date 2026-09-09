@@ -298,7 +298,7 @@ pw.Widget _reportHeader(
       runSpacing: 6,
       children: [
         _legendItem(
-          _textureBand(MarkerTexture.solid, width: 20, height: 5),
+          pw.Container(width: 20, height: 8, color: _periodShade),
           'period',
           fonts,
         ),
@@ -427,9 +427,10 @@ pw.Widget _monthCell(
   return pw.Container(
     height: height,
     padding: const pw.EdgeInsets.all(2),
-    decoration: date == data.today
-        ? pw.BoxDecoration(border: pw.Border.all(width: 1.2))
-        : null,
+    decoration: pw.BoxDecoration(
+      color: marker.inPeriod ? _periodShade : null,
+      border: date == data.today ? pw.Border.all(width: 1.2) : null,
+    ),
     child: pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
@@ -437,19 +438,9 @@ pw.Widget _monthCell(
           '$dayNumber',
           style: pw.TextStyle(font: fonts.monoMedium, fontSize: 9),
         ),
-        pw.SizedBox(height: 2),
-        marker.inPeriod
-            ? _textureBand(MarkerTexture.solid, width: 40, height: 4)
-            : pw.SizedBox(height: 4),
-        pw.SizedBox(height: 2),
-        for (var lane = 0; lane < data.legendEntries.length; lane++) ...[
-          marker.medicationMarkers.any((item) => item.laneIndex == lane)
-              ? _textureBand(
-                  Markers.print.lane(lane).texture,
-                  width: 40,
-                  height: 3,
-                )
-              : pw.SizedBox(height: 3),
+        pw.SizedBox(height: 4),
+        for (final entry in data.legendEntries) ...[
+          _laneRow(marker, entry, dayNumber == 1, fonts),
           pw.SizedBox(height: 1),
         ],
         pw.Spacer(),
@@ -774,6 +765,39 @@ pw.Widget _medicationCourses(ReportData data, _ReportFonts fonts) {
   );
 }
 
+pw.Widget _laneRow(
+  DayCellMarkerData marker,
+  ReportLegendEntry entry,
+  bool firstOfMonth,
+  _ReportFonts fonts,
+) {
+  final item = marker.medicationMarkers
+      .where((item) => item.laneIndex == entry.laneIndex)
+      .firstOrNull;
+  if (item == null) return pw.SizedBox(height: 6);
+  return pw.SizedBox(
+    height: 6,
+    child: pw.Row(
+      children: [
+        pw.SizedBox(
+          width: 9,
+          child: item.startsWindow || firstOfMonth
+              ? pw.Text(
+                  entry.label,
+                  style: pw.TextStyle(font: fonts.mono, fontSize: 5),
+                )
+              : null,
+        ),
+        _textureBand(
+          Markers.print.lane(entry.laneIndex).texture,
+          width: 40,
+          height: 3,
+        ),
+      ],
+    ),
+  );
+}
+
 pw.Widget _textureBand(
   MarkerTexture texture, {
   required double width,
@@ -893,8 +917,9 @@ String _formatMean(double mean) => mean == mean.roundToDouble()
 String _printCount(int count) => count == 0 ? '·' : '$count';
 
 double _monthCellHeight(int medicationCount) =>
-    45 + (medicationCount > 4 ? medicationCount - 4 : 0) * 4;
+    52 + (medicationCount > 4 ? medicationCount - 4 : 0) * 7;
 
+const _periodShade = PdfColor.fromInt(0xFFE3E3E3);
 const _rule = PdfColor.fromInt(0xffb3b3b3);
 const _pageMargin = 24.0;
 const _matrixNameWidth = 150.0;
