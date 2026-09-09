@@ -14,6 +14,11 @@ class DateRange {
   final DateTime end;
 }
 
+final unboundedDateRange = DateRange(
+  start: DateTime(1, 1, 1),
+  end: DateTime(9999, 12, 31),
+);
+
 class MedicationWindow {
   MedicationWindow({
     required DateTime start,
@@ -152,7 +157,7 @@ List<MedicationWindow> _deriveWindows(
   final cyclical = schedule as CyclicalMedicationSchedule;
   final windows = <MedicationWindow>[];
   for (final period in periods) {
-    if (!cyclicalScheduleAppliesToPeriodStart(cyclical, period.start)) {
+    if (!_cyclicalScheduleAppliesToPeriodStart(cyclical, period.start)) {
       continue;
     }
     final start = addCalendarDays(period.start, cyclical.startCycleDay - 1);
@@ -177,7 +182,7 @@ List<MedicationWindow> _clipWindows(
       ),
 ];
 
-bool cyclicalScheduleAppliesToPeriodStart(
+bool _cyclicalScheduleAppliesToPeriodStart(
   CyclicalMedicationSchedule schedule,
   DateTime periodStart,
 ) {
@@ -203,7 +208,7 @@ bool medicationHasDerivableWindows(
   }
   final cyclical = schedule as CyclicalMedicationSchedule;
   return periods.any(
-    (period) => cyclicalScheduleAppliesToPeriodStart(cyclical, period.start),
+    (period) => _cyclicalScheduleAppliesToPeriodStart(cyclical, period.start),
   );
 }
 
@@ -214,15 +219,11 @@ DateTime latestDerivedWindowEnd({
   required DateTime today,
 }) {
   var latest = dateOnly(today);
-  final derivationRange = DateRange(
-    start: DateTime(1, 1, 1),
-    end: DateTime(9999, 12, 31),
-  );
   for (final medication in medications) {
     for (final window in deriveAdjustedWindows(
       medication,
       periods,
-      derivationRange,
+      unboundedDateRange,
       adjustments,
       today: today,
     )) {
@@ -234,35 +235,28 @@ DateTime latestDerivedWindowEnd({
   return latest;
 }
 
+DateRange rangeForMonths(DateTime today, int months, DateTime rangeEnd) =>
+    DateRange(
+      start: DateTime(today.year, today.month - months + 1),
+      end: rangeEnd.isAfter(today) ? rangeEnd : today,
+    );
+
 DateTime? previousAdjustedCourseStart({
-  required int medicationId,
   required DateTime sourcePeriodStart,
   required List<MedicationWindow> unadjustedWindows,
-  required List<WindowAdjustment> adjustments,
+  required Map<DateTime, WindowAdjustment> adjustmentsBySourcePeriod,
 }) {
   MedicationWindow? previous;
   for (final window in unadjustedWindows) {
     final source = window.sourcePeriodStart;
     if (source == null || !source.isBefore(sourcePeriodStart)) continue;
     if (previous == null || source.isAfter(previous.sourcePeriodStart!)) {
-      final adjustment = adjustments
-          .where(
-            (candidate) =>
-                candidate.medicationId == medicationId &&
-                candidate.sourcePeriodStart == source,
-          )
-          .firstOrNull;
+      final adjustment = adjustmentsBySourcePeriod[source];
       if (adjustment?.kind != WindowAdjustmentKind.skipped) previous = window;
     }
   }
   if (previous == null) return null;
-  final adjustment = adjustments
-      .where(
-        (candidate) =>
-            candidate.medicationId == medicationId &&
-            candidate.sourcePeriodStart == previous!.sourcePeriodStart,
-      )
-      .firstOrNull;
+  final adjustment = adjustmentsBySourcePeriod[previous.sourcePeriodStart];
   return adjustment?.startDate ?? previous.start;
 }
 

@@ -4,7 +4,6 @@ import 'package:hmmm/data/medication_repository.dart';
 import 'package:hmmm/domain/hrt_window.dart';
 import 'package:hmmm/domain/models.dart';
 import 'package:hmmm/export/ics.dart';
-import 'package:hmmm/ui/settings.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -310,5 +309,20 @@ void main() {
     expect(range.end, DateTime(2026, 6, 27));
     expect(output, contains('DTSTART;VALUE=DATE:20260616'));
     expect(output, contains('DTEND;VALUE=DATE:20260628'));
+  });
+
+  test('open period ends on the export date, not the range end', () {
+    final today = DateTime(2026, 6, 15);
+    final output = buildIcs(
+      periods: [Period(start: DateTime(2026, 6, 2))],
+      windowsByMedication: const [],
+      symptomDaysByType: const [],
+      range: DateRange(start: DateTime(2026, 6, 1), end: DateTime(2026, 6, 27)),
+      exportedAt: today,
+    );
+
+    expect(output, contains('DTSTART;VALUE=DATE:20260602'));
+    expect(output, contains('DTEND;VALUE=DATE:20260616'));
+    expect(output, isNot(contains('DTEND;VALUE=DATE:20260628')));
   });
 }

@@ -1,5 +1,4 @@
-// Renders every screen with seeded fixture data and writes PNGs to
-// design/screenshots/. Not part of the normal suite: run with
+// Not part of the normal suite: run with
 //   flutter test test/screenshots --dart-define=screenshots=true
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -23,11 +22,6 @@ const _enabled = bool.fromEnvironment('screenshots');
 const _scalePercent = int.fromEnvironment('scale', defaultValue: 100);
 
 void main() {
-  if (!_enabled) {
-    test('screenshot generator disabled', () {});
-    return;
-  }
-
   late Database database;
   late PeriodRepository periods;
   late MedicationRepository medications;
@@ -40,8 +34,10 @@ void main() {
     sqfliteFfiInit();
     WidgetsApp.debugAllowBannerOverride = false;
     final iconLoader = FontLoader('MaterialIcons');
+    final flutterRoot =
+        Platform.environment['FLUTTER_ROOT'] ?? '/opt/homebrew/share/flutter';
     final iconBytes = File(
-      '/opt/homebrew/share/flutter/bin/cache/artifacts/material_fonts/'
+      '$flutterRoot/bin/cache/artifacts/material_fonts/'
       'MaterialIcons-Regular.otf',
     ).readAsBytesSync();
     iconLoader.addFont(Future.value(ByteData.view(iconBytes.buffer)));
@@ -174,7 +170,6 @@ void main() {
     });
     File('${outDir.path}/$name-s$_scalePercent.png')
         .writeAsBytesSync(bytes!.buffer.asUint8List());
-    if (const bool.fromEnvironment('dumpErrors')) return;
     for (
       var e = tester.takeException();
       e != null;
@@ -220,7 +215,7 @@ void main() {
     testWidgets('calendar $mode', (tester) async {
       await pumpApp(tester, brightness);
       await capture(tester, '01-calendar-$mode');
-    });
+    }, skip: !_enabled);
 
     testWidgets('day sheet $mode', (tester) async {
       await pumpApp(tester, brightness);
@@ -241,19 +236,19 @@ void main() {
       expect(day.hitTestable(), findsOneWidget);
       await tester.tap(day);
       await capture(tester, '02-day-sheet-$mode');
-    });
+    }, skip: !_enabled);
 
     testWidgets('trends $mode', (tester) async {
       await pumpApp(tester, brightness);
       await tester.tap(find.text('TRENDS'));
       await capture(tester, '03-trends-$mode');
-    });
+    }, skip: !_enabled);
 
     testWidgets('settings $mode', (tester) async {
       await pumpApp(tester, brightness);
       await tester.tap(find.text('SETTINGS'));
       await capture(tester, '04-settings-$mode');
-    });
+    }, skip: !_enabled);
 
     testWidgets('settings records $mode', (tester) async {
       await pumpApp(tester, brightness);
@@ -261,7 +256,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Records'));
       await capture(tester, '04-records-$mode');
-    });
+    }, skip: !_enabled);
 
     testWidgets('settings export and print $mode', (tester) async {
       await pumpApp(tester, brightness);
@@ -269,7 +264,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Export & print'));
       await capture(tester, '04-export-print-$mode');
-    });
+    }, skip: !_enabled);
 
     testWidgets('medications $mode', (tester) async {
       await pumpApp(tester, brightness);
@@ -279,7 +274,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Medications'));
       await capture(tester, '05-medications-$mode');
-    });
+    }, skip: !_enabled);
 
     testWidgets('interval medication form $mode', (tester) async {
       await pumpApp(tester, brightness);
@@ -293,7 +288,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Interval'));
       await capture(tester, '06-interval-medication-form-$mode');
-    });
+    }, skip: !_enabled);
 
     testWidgets('period records $mode', (tester) async {
       await pumpApp(tester, brightness);
@@ -303,7 +298,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Period records'));
       await capture(tester, '07-period-records-$mode');
-    });
+    }, skip: !_enabled);
 
     testWidgets('symptom types $mode', (tester) async {
       await pumpApp(tester, brightness);
@@ -313,7 +308,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Symptom types'));
       await capture(tester, '08-symptom-types-$mode');
-    });
+    }, skip: !_enabled);
   }
 }
 

@@ -14,29 +14,21 @@ class SettingsRepository extends ChangeNotifier {
   AppThemeMode get themeMode => _themeMode;
 
   Future<void> load() async {
-    final rows = await _database.query(
-      'settings',
-      columns: ['key', 'value'],
-      where: 'key IN (?, ?)',
-      whereArgs: ['require_unlock', 'theme_mode'],
+    final rows = await _database.rawQuery(
+      'SELECT key, value FROM settings WHERE key IN (?, ?)',
+      ['require_unlock', 'theme_mode'],
     );
     final values = {
       for (final row in rows) row['key'] as String: row['value'] as String,
     };
     if (!values.containsKey('require_unlock')) {
-      await _database.insert('settings', {
-        'key': 'require_unlock',
-        'value': 'false',
-      });
+      await _write('require_unlock', 'false');
       _requireUnlock = false;
     } else {
       _requireUnlock = values['require_unlock'] == 'true';
     }
     if (!values.containsKey('theme_mode')) {
-      await _database.insert('settings', {
-        'key': 'theme_mode',
-        'value': AppThemeMode.system.name,
-      });
+      await _write('theme_mode', AppThemeMode.system.name);
       _themeMode = AppThemeMode.system;
     } else {
       _themeMode = AppThemeMode.values.firstWhere(
@@ -47,19 +39,13 @@ class SettingsRepository extends ChangeNotifier {
   }
 
   Future<void> setRequireUnlock(bool value) async {
-    await _database.insert('settings', {
-      'key': 'require_unlock',
-      'value': value.toString(),
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await _write('require_unlock', value.toString());
     _requireUnlock = value;
     notifyListeners();
   }
 
   Future<void> setThemeMode(AppThemeMode value) async {
-    await _database.insert('settings', {
-      'key': 'theme_mode',
-      'value': value.name,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await _write('theme_mode', value.name);
     _themeMode = value;
     notifyListeners();
   }
@@ -67,5 +53,15 @@ class SettingsRepository extends ChangeNotifier {
   Future<void> refresh() async {
     await load();
     notifyListeners();
+  }
+
+  Future<void> _write(String key, String value) async {
+    await _database.rawInsert(
+      '''
+      INSERT INTO settings(key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      ''',
+      [key, value],
+    );
   }
 }

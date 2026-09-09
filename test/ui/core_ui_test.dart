@@ -45,6 +45,24 @@ void main() {
     await database.close();
   });
 
+  Future<void> pumpApp(
+    WidgetTester tester, {
+    SettingsRepository? withSettings,
+  }) async {
+    await tester.pumpWidget(
+      HmmmApp(
+        periodRepository: periods,
+        medicationRepository: medications,
+        symptomRepository: symptoms,
+        settingsRepository: withSettings ?? settings,
+        backupRepository: JsonBackupRepository(database),
+        authenticator: _FakeAuthenticator(),
+        today: today,
+      ),
+    );
+    await _pumpFrames(tester);
+  }
+
   testWidgets('calendar renders a seeded month and opens its day sheet', (
     tester,
   ) async {
@@ -52,15 +70,7 @@ void main() {
       Period(start: DateTime(2026, 6, 9), end: DateTime(2026, 6, 12)),
       today: today,
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
 
     expect(find.byKey(const ValueKey('month-2026-06')), findsOneWidget);
     final semanticsHandle = tester.ensureSemantics();
@@ -83,15 +93,7 @@ void main() {
       Period(start: DateTime(2026, 6, 9), end: DateTime(2026, 6, 12)),
       today: today,
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
 
     await tester.tap(find.byKey(const ValueKey('day-2026-06-10')));
     await _pumpFrames(tester);
@@ -104,15 +106,7 @@ void main() {
   });
 
   testWidgets('home navigation renders uppercase labels', (tester) async {
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
 
     expect(find.text('CALENDAR'), findsOneWidget);
   });
@@ -164,15 +158,7 @@ void main() {
         active: false,
       ),
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
 
     expect(find.text('Progesterone (stopped)'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('day-2026-06-02')));
@@ -197,15 +183,7 @@ void main() {
         active: true,
       ),
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     final laterBand = find.byKey(
       ValueKey('medication-band-2026-06-04-${medication.id}'),
     );
@@ -268,15 +246,7 @@ void main() {
         kind: WindowAdjustmentKind.skipped,
       ),
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     final band = find.byKey(
       ValueKey('medication-band-2026-06-03-${medication.id}'),
     );
@@ -314,15 +284,7 @@ void main() {
         active: true,
       ),
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     final grabbedDay = find.byKey(const ValueKey('day-2026-06-02'));
     final targetDay = find.byKey(const ValueKey('day-2026-06-04'));
     final gesture = await tester.startGesture(tester.getCenter(grabbedDay));
@@ -369,15 +331,7 @@ void main() {
         active: true,
       ),
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     final day = find.byKey(const ValueKey('day-2026-06-02'));
     var gesture = await tester.startGesture(tester.getCenter(day));
     await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
@@ -415,15 +369,7 @@ void main() {
         active: true,
       ),
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
 
     await tester.tap(find.byKey(const ValueKey('day-2026-06-02')));
     await _pumpFrames(tester);
@@ -475,15 +421,7 @@ void main() {
   testWidgets('symptom chip cycles through clear and persists after re-pump', (
     tester,
   ) async {
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.byKey(const ValueKey('day-2026-06-10')));
     await _pumpFrames(tester);
     final chip = find.byKey(const ValueKey('symptom-chip-2026-06-10-1'));
@@ -504,15 +442,7 @@ void main() {
 
     await tester.tapAt(const Offset(10, 10));
     await _pumpFrames(tester);
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.byKey(const ValueKey('day-2026-06-10')));
     await _pumpFrames(tester);
     await tester.ensureVisible(chip);
@@ -529,15 +459,7 @@ void main() {
   });
 
   testWidgets('day sheet shows the severity affordance', (tester) async {
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.byKey(const ValueKey('day-2026-06-10')));
     await _pumpFrames(tester);
 
@@ -632,15 +554,7 @@ void main() {
   testWidgets('today disables next day and paging cannot reach tomorrow', (
     tester,
   ) async {
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.byKey(const ValueKey('day-2026-06-15')));
     await _pumpFrames(tester);
 
@@ -663,15 +577,7 @@ void main() {
   testWidgets('future initial day can page back but not forward', (
     tester,
   ) async {
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.byKey(const ValueKey('day-2026-06-16')));
     await _pumpFrames(tester);
 
@@ -737,15 +643,7 @@ void main() {
       SymptomEntry(date: DateTime(2026, 6, 10), typeId: 3, severity: 3),
       today: today,
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.byKey(const ValueKey('day-2026-06-10')));
     await _pumpFrames(tester);
 
@@ -766,15 +664,7 @@ void main() {
   testWidgets('period started then period ended writes a closed period', (
     tester,
   ) async {
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.byKey(const ValueKey('day-2026-06-10')));
     await _pumpFrames(tester);
 
@@ -797,15 +687,7 @@ void main() {
       Period(start: DateTime(2026, 6, 8), end: DateTime(2026, 6, 11)),
       today: today,
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.byKey(const ValueKey('day-2026-06-10')));
     await _pumpFrames(tester);
 
@@ -825,15 +707,7 @@ void main() {
       Period(start: today, end: today),
       today: today,
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
 
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
@@ -857,15 +731,7 @@ void main() {
       Period(start: DateTime(2026, 6, 1), end: DateTime(2026, 6, 5)),
       today: today,
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
 
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
@@ -898,15 +764,7 @@ void main() {
     expect(inserted.dose, '200 mg');
 
     await tester.pumpWidget(const SizedBox.shrink());
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
     await tester.tap(find.text('Records'));
@@ -958,15 +816,7 @@ void main() {
     );
     tester.platformDispatcher.textScaleFactorTestValue = 2;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
     await tester.tap(find.text('Records'));
@@ -1017,7 +867,7 @@ void main() {
       tester
           .getSemantics(find.byKey(const ValueKey('medication-derivation')))
           .label,
-      '→ 12 days every 28 days from 4 Mar 2026',
+      '12 days every 28 days from 4 Mar 2026',
     );
     for (
       var drag = 0;
@@ -1048,15 +898,7 @@ void main() {
         active: true,
       ),
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
     await tester.tap(find.text('Records'));
@@ -1125,15 +967,7 @@ void main() {
         active: true,
       ),
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     expect(find.text('Progesterone'), findsOneWidget);
 
     await tester.tap(find.text('SETTINGS'));
@@ -1161,30 +995,14 @@ void main() {
 
     expect(await medications.listMedications(), isEmpty);
     await tester.pumpWidget(const SizedBox.shrink());
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     expect(find.text('Progesterone'), findsNothing);
   });
 
   testWidgets('symptom types can be added and custom types deleted', (
     tester,
   ) async {
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
     await tester.tap(find.text('Records'));
@@ -1260,15 +1078,7 @@ void main() {
         active: true,
       ),
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
     await tester.tap(find.text('Records'));
@@ -1319,15 +1129,7 @@ void main() {
     await symptoms.insertType(
       const SymptomType(name: 'dizziness', builtin: false),
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
 
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
@@ -1414,15 +1216,7 @@ void main() {
   ) async {
     final source = await JsonBackupRepository(database)
         .export(exportedAt: today);
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
     await tester.tap(find.text('Export & print'));
@@ -1460,15 +1254,7 @@ void main() {
         active: true,
       ),
     );
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
 
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
@@ -1488,15 +1274,7 @@ void main() {
   ) async {
     tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
     addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      settings,
-      database,
-      today,
-    );
+    await pumpApp(tester);
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
     await tester.scrollUntilVisible(
@@ -1535,15 +1313,7 @@ void main() {
     final restartedSettings = SettingsRepository(database);
     addTearDown(restartedSettings.dispose);
     await restartedSettings.load();
-    await _pumpApp(
-      tester,
-      periods,
-      medications,
-      symptoms,
-      restartedSettings,
-      database,
-      today,
-    );
+    await pumpApp(tester, withSettings: restartedSettings);
 
     expect(restartedSettings.themeMode, AppThemeMode.dark);
     expect(
@@ -1576,15 +1346,7 @@ void main() {
       ]) {
         await symptoms.upsertEntry(entry, today: today);
       }
-      await _pumpApp(
-        tester,
-        periods,
-        medications,
-        symptoms,
-        settings,
-        database,
-        today,
-      );
+      await pumpApp(tester);
 
       await tester.tap(find.text('TRENDS'));
       await _pumpFrames(tester);
@@ -1634,29 +1396,6 @@ void main() {
       expect(find.byKey(const ValueKey('monthly-count-1-11')), findsOneWidget);
     },
   );
-}
-
-Future<void> _pumpApp(
-  WidgetTester tester,
-  PeriodRepository periods,
-  MedicationRepository medications,
-  SymptomRepository symptoms,
-  SettingsRepository settings,
-  Database database,
-  DateTime today,
-) async {
-  await tester.pumpWidget(
-    HmmmApp(
-      periodRepository: periods,
-      medicationRepository: medications,
-      symptomRepository: symptoms,
-      settingsRepository: settings,
-      backupRepository: JsonBackupRepository(database),
-      authenticator: _FakeAuthenticator(),
-      today: today,
-    ),
-  );
-  await _pumpFrames(tester);
 }
 
 class _FakeAuthenticator implements AppAuthenticator {

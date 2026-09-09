@@ -32,7 +32,7 @@ String buildIcs({
   ];
 
   for (final period in periods) {
-    final clipped = _clip(period.start, period.end ?? range.end, range);
+    final clipped = _clip(period.start, period.end ?? exportedAt, range);
     if (clipped == null) continue;
     _addEvent(
       lines,

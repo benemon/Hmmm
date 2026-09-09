@@ -5,7 +5,6 @@ import 'package:hmmm/domain/hrt_window.dart';
 import 'package:hmmm/domain/models.dart';
 import 'package:hmmm/domain/trends.dart';
 import 'package:hmmm/export/report.dart';
-import 'package:hmmm/ui/settings.dart';
 import 'package:hmmm/ui/theme.dart';
 import 'package:pdf/pdf.dart';
 
@@ -80,15 +79,18 @@ void main() {
   );
 
   test('report uses the shared marker texture metrics', () {
-    expect(reportTextureMetrics(MarkerTexture.dotted, 24), (
+    expect(MarkerTextureMetrics.forTexture(MarkerTexture.dotted, 24), (
       MarkerTextureMetrics.dottedMark,
       MarkerTextureMetrics.dottedGap,
     ));
-    expect(reportTextureMetrics(MarkerTexture.dashed, 24), (
+    expect(MarkerTextureMetrics.forTexture(MarkerTexture.dashed, 24), (
       MarkerTextureMetrics.dashedMark,
       MarkerTextureMetrics.dashedGap,
     ));
-    expect(reportTextureMetrics(MarkerTexture.dashed, 24), (8.0, 4.0));
+    expect(MarkerTextureMetrics.forTexture(MarkerTexture.dashed, 24), (
+      8.0,
+      4.0,
+    ));
   });
 
   test('every report page is portrait A4', () async {
@@ -157,7 +159,7 @@ void main() {
       );
       final letterhead = reportLetterheadSvg(
         data: data,
-        template: await rootBundle.loadString('assets/brand/letterhead.svg'),
+        template: await rootBundle.loadString('brand/letterhead.svg'),
       );
 
       expect(letterhead, contains('15 Jun 26'));

@@ -403,7 +403,7 @@ void main() {
     final repository = SymptomRepository(database);
     final type = (await repository.listTypes()).first;
     final today = DateTime(2026, 6, 15);
-    final inserted = await repository.upsertEntry(
+    await repository.upsertEntry(
       SymptomEntry(
         date: DateTime(2026, 6, 10, 22),
         typeId: type.id!,
@@ -413,30 +413,28 @@ void main() {
       today: today,
     );
 
-    expect(inserted, isNotNull);
-    expect(await repository.listEntries(), [inserted]);
+    final inserted = (await repository.listEntries()).single;
     expect(await database.query('symptom_entries', columns: ['date']), [
       {'date': '2026-06-10'},
     ]);
 
-    final upserted = await repository.upsertEntry(
+    await repository.upsertEntry(
       SymptomEntry(
-        date: inserted!.date,
+        date: inserted.date,
         typeId: inserted.typeId,
         severity: 3,
         note: 'Evening',
       ),
       today: today,
     );
-    expect(upserted!.id, inserted.id);
+    final upserted = (await repository.listEntries()).single;
+    expect(upserted.id, inserted.id);
     expect(upserted.severity, 3);
-    expect(await repository.listEntries(), hasLength(1));
 
-    final cleared = await repository.upsertEntry(
+    await repository.upsertEntry(
       SymptomEntry(date: inserted.date, typeId: inserted.typeId, severity: 0),
       today: today,
     );
-    expect(cleared, isNull);
     expect(await repository.listEntries(), isEmpty);
   });
 

@@ -7,7 +7,6 @@ import '../data/period_repository.dart';
 import '../data/symptom_repository.dart';
 import '../domain/calendar.dart';
 import '../domain/cycle_lengths.dart';
-import '../domain/dates.dart';
 import '../domain/models.dart';
 import '../domain/trends.dart';
 import 'empty_state.dart';
@@ -125,6 +124,7 @@ class _TrendsBody extends StatelessWidget {
         else ...[
           _CyclesTable(
             periods: data.periods,
+            lengths: cycleLengths,
             today: today,
             onTap: (period) => showPeriodRecordEditor(
               context,
@@ -190,7 +190,7 @@ class _TrendsBody extends StatelessWidget {
           title: 'Monthly counts',
           basis:
               '$monthlyTotal entries over 12 months to '
-              '${monthsShort[today.month - 1]} ${today.year}',
+              '${formatMonthYear(today)}',
         ),
         const SizedBox(height: Dim.s2),
         if (data.entries.isEmpty)
@@ -205,8 +205,7 @@ class _TrendsBody extends StatelessWidget {
               for (final month in monthly.months)
                 _MatrixColumn(
                   visualLabel: _formatMonth(month),
-                  semanticLabel:
-                      '${monthsShort[month.month - 1]} ${month.year}',
+                  semanticLabel: formatMonthYear(month),
                   width: 40,
                 ),
             ],
@@ -275,33 +274,38 @@ class _SectionHeading extends StatelessWidget {
 class _CyclesTable extends StatelessWidget {
   const _CyclesTable({
     required this.periods,
+    required this.lengths,
     required this.today,
     required this.onTap,
   });
 
   final List<Period> periods;
+  final List<int?> lengths;
   final DateTime today;
   final ValueChanged<Period> onTap;
 
   @override
   Widget build(BuildContext context) {
-    final lengths = cycleLengthsToNext(periods);
-    final records = [
-      for (var index = periods.length - 1; index >= 0; index--)
-        (period: periods[index], length: lengths[index]),
-    ];
+    final records = periods.indexed.toList().reversed.map((record) {
+      final (index, period) = record;
+      final days = recordedPeriodLength(period, today);
+      return (
+        start: formatDate(period.start),
+        days: days,
+        daysSemantic: '$days days',
+        daysVisual: '$days',
+        cycle: _cycleValue(period, lengths[index]),
+        period: period,
+      );
+    }).toList();
     return _TableSemantics(
       label: 'Cycles',
       headers: const ['start', 'days', 'cycle'],
       rows: [
         for (final record in records)
           (
-            [
-              formatDate(record.period.start),
-              '${_periodDays(record.period, today)} days',
-              _cycleValue(record.period, record.length),
-            ],
-            'Period starting ${formatDate(record.period.start)}',
+            [record.start, record.daysSemantic, record.cycle],
+            'Period starting ${record.start}',
           ),
       ],
       onRowTaps: [for (final record in records) () => onTap(record.period)],
@@ -321,9 +325,9 @@ class _CyclesTable extends StatelessWidget {
                 key: ValueKey('trend-period-${record.period.id}'),
                 onTap: () => onTap(record.period),
                 child: _CycleRow(
-                  start: formatDate(record.period.start),
-                  days: '${_periodDays(record.period, today)}',
-                  cycle: _cycleValue(record.period, record.length),
+                  start: record.start,
+                  days: record.daysVisual,
+                  cycle: record.cycle,
                   showChevron: true,
                 ),
               ),
@@ -953,9 +957,6 @@ class _SemanticTableRow extends StatelessWidget {
     );
   }
 }
-
-int _periodDays(Period period, DateTime today) =>
-    calendarDaysBetween(period.start, period.end ?? today) + 1;
 
 String _cycleValue(Period period, int? length) {
   if (length != null) return '$length';
