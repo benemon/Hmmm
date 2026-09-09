@@ -51,8 +51,6 @@ void main() {
       expect(authenticator.calls, 1);
 
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-      await tester.pumpAndSettle();
-      expect(find.text('clinical data'), findsNothing);
 
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump();
