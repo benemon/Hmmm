@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.2
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - name: Merged manifest requests no network permission and no backup
+        run: |
+          manifest=build/app/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml
+          test -f "$manifest"
+          ! grep -q 'android.permission.INTERNET' "$manifest"
+          grep -q 'android:allowBackup="false"' "$manifest"
+      - name: Publish release with the APK attached
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/app/outputs/apk/release/hmmm-*-release.apk \
+            --verify-tag --title "$GITHUB_REF_NAME" --notes-from-tag
