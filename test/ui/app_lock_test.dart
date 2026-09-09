@@ -12,56 +12,62 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 void main() {
   setUpAll(sqfliteFfiInit);
 
-  testWidgets('lock gate authenticates on start and after background resume', (
-    tester,
-  ) async {
-    final database = await openHmmmDatabase(
-      factory: databaseFactoryFfiNoIsolate,
-      path: inMemoryDatabasePath,
-    );
-    final settings = SettingsRepository(database);
-    await settings.load();
-    await settings.setRequireUnlock(true);
-    final authenticator = _FakeAuthenticator();
+  testWidgets(
+    'lock gate authenticates on start and after a paused resume, not on focus loss',
+    (tester) async {
+      final database = await openHmmmDatabase(
+        factory: databaseFactoryFfiNoIsolate,
+        path: inMemoryDatabasePath,
+      );
+      final settings = SettingsRepository(database);
+      await settings.load();
+      await settings.setRequireUnlock(true);
+      final authenticator = _FakeAuthenticator();
 
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: hmmmTheme(Brightness.light),
-        home: AppLockGate(
-          settingsRepository: settings,
-          authenticator: authenticator,
-          child: const Text('clinical data'),
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: hmmmTheme(Brightness.light),
+          home: AppLockGate(
+            settingsRepository: settings,
+            authenticator: authenticator,
+            child: const Text('clinical data'),
+          ),
         ),
-      ),
-    );
-    await tester.pump();
+      );
+      await tester.pump();
 
-    expect(find.text('Hmmm is locked'), findsOneWidget);
-    expect(find.text('device authentication required'), findsOneWidget);
-    expect(find.text('clinical data'), findsNothing);
-    expect(authenticator.calls, 1);
+      expect(find.text('Hmmm is locked'), findsOneWidget);
+      expect(find.text('device authentication required'), findsOneWidget);
+      expect(find.text('clinical data'), findsNothing);
+      expect(authenticator.calls, 1);
 
-    authenticator.complete(true);
-    await tester.pumpAndSettle();
-    expect(find.text('clinical data'), findsOneWidget);
+      authenticator.complete(true);
+      await tester.pumpAndSettle();
+      expect(find.text('clinical data'), findsOneWidget);
 
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-    await tester.pumpAndSettle();
-    expect(find.text('clinical data'), findsNothing);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pumpAndSettle();
+      expect(find.text('clinical data'), findsOneWidget);
+      expect(authenticator.calls, 1);
 
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await tester.pump();
-    await tester.pump();
-    expect(authenticator.calls, 2);
-    expect(find.text('Hmmm is locked'), findsOneWidget);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pumpAndSettle();
+      expect(find.text('clinical data'), findsNothing);
 
-    authenticator.complete(true);
-    await tester.pumpAndSettle();
-    expect(find.text('clinical data'), findsOneWidget);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await tester.pump();
+      expect(authenticator.calls, 2);
+      expect(find.text('Hmmm is locked'), findsOneWidget);
 
-    settings.dispose();
-    await database.close();
-  });
+      authenticator.complete(true);
+      await tester.pumpAndSettle();
+      expect(find.text('clinical data'), findsOneWidget);
+
+      settings.dispose();
+      await database.close();
+    },
+  );
 }
 
 class _FakeAuthenticator implements AppAuthenticator {
