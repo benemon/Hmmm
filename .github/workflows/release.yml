@@ -22,8 +22,10 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: flutter build apk --release
       - run: flutter build apk --release --split-per-abi --target-platform android-arm64
+      - run: mkdir dist && cp build/app/outputs/apk/release/hmmm-*-arm64-v8a-release.apk dist/
+      - run: flutter build apk --release
+      - run: cp build/app/outputs/apk/release/hmmm-*-release.apk dist/
       - name: Merged manifest requests no network permission and no backup
         run: |
           manifest=build/app/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml
@@ -35,7 +37,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#v}"
-          out=build/app/outputs/apk/release
+          out=dist
           gh release create "$GITHUB_REF_NAME" \
             "$out/hmmm-$version-arm64-v8a-release.apk#Hmmm $GITHUB_REF_NAME (arm64, most phones)" \
             "$out/hmmm-$version-release.apk#Hmmm $GITHUB_REF_NAME (universal)" \
