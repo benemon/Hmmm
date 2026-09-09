@@ -42,9 +42,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!widget.settingsRepository.requireUnlock) return;
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused ||
-        state == AppLifecycleState.hidden) {
+    if (state == AppLifecycleState.paused) {
       if (mounted) setState(() => _locked = true);
     } else if (state == AppLifecycleState.resumed && _locked) {
       _authenticate();
