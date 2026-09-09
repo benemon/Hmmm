@@ -10,6 +10,7 @@ import '../domain/hrt_window.dart';
 import '../domain/models.dart';
 import '../domain/trends.dart';
 import '../ui/format.dart';
+import '../ui/symptom_glyph.dart';
 import '../ui/theme.dart';
 
 class ReportLegendEntry {
@@ -52,10 +53,10 @@ class ReportData {
     required this.range,
     required this.today,
     required this.periods,
-    required this.medications,
     required this.symptomTypes,
     required this.symptomEntries,
     required this.windowsByMedicationId,
+    required this.laneByMedicationId,
     required this.months,
     required this.cycleLengths,
     required this.cycleSummaries,
@@ -70,10 +71,10 @@ class ReportData {
   final DateRange range;
   final DateTime today;
   final List<Period> periods;
-  final List<Medication> medications;
   final List<SymptomType> symptomTypes;
   final List<SymptomEntry> symptomEntries;
   final Map<int, List<MedicationWindow>> windowsByMedicationId;
+  final Map<int, int> laneByMedicationId;
   final List<WindowAdjustment> windowAdjustments;
   final List<DateTime> months;
   final List<int?> cycleLengths;
@@ -117,10 +118,10 @@ ReportData assembleReportData({
     range: range,
     today: dateOnly(today),
     periods: periods,
-    medications: medications,
     symptomTypes: symptomTypes,
     symptomEntries: symptomEntries,
     windowsByMedicationId: windowsByMedicationId,
+    laneByMedicationId: lanes,
     windowAdjustments: windowAdjustments,
     months: [
       for (var offset = 0; offset < monthCount; offset++)
@@ -153,7 +154,7 @@ Future<Uint8List> buildReportPdf(ReportData data) async {
   final fonts = await _ReportFonts.load();
   final letterhead = reportLetterheadSvg(
     data: data,
-    template: await rootBundle.loadString('assets/brand/letterhead.svg'),
+    template: await rootBundle.loadString('brand/letterhead.svg'),
   );
   final document = pw.Document();
   final theme = pw.ThemeData.withFont(base: fonts.sans, bold: fonts.sansBold);
@@ -161,7 +162,7 @@ Future<Uint8List> buildReportPdf(ReportData data) async {
   document.addPage(
     pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.all(24),
+      margin: const pw.EdgeInsets.all(_pageMargin),
       theme: theme,
       footer: (context) => _footer(context, fonts),
       build: (context) => [
@@ -187,7 +188,7 @@ Future<Uint8List> buildReportPdf(ReportData data) async {
   document.addPage(
     pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.all(24),
+      margin: const pw.EdgeInsets.all(_pageMargin),
       theme: theme,
       footer: (context) => _footer(context, fonts),
       build: (context) => [
@@ -203,7 +204,7 @@ Future<Uint8List> buildReportPdf(ReportData data) async {
         _sectionHeading(
           'Monthly counts',
           '${_monthlyTotal(data.monthlySymptomCounts)} entries over 12 months '
-              'to ${monthsShort[data.today.month - 1]} ${data.today.year}',
+              'to ${formatMonthYear(data.today)}',
           fonts,
         ),
         ..._matrixTables(data.monthlyMatrixChunks, fonts),
@@ -350,10 +351,6 @@ pw.Widget _footer(pw.Context context, _ReportFonts fonts) => pw.Container(
 pw.Widget _monthGrid(ReportData data, DateTime month, _ReportFonts fonts) {
   final firstOffset = month.weekday - DateTime.monday;
   final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
-  final lanes = {
-    for (final entry in data.legendEntries)
-      entry.medication.id!: entry.laneIndex,
-  };
   final rows = <pw.TableRow>[
     pw.TableRow(
       repeat: true,
@@ -377,7 +374,7 @@ pw.Widget _monthGrid(ReportData data, DateTime month, _ReportFonts fonts) {
           for (var weekday = 0; weekday < 7; weekday++)
             _monthCell(
               data,
-              lanes,
+              data.laneByMedicationId,
               month,
               week * 7 + weekday - firstOffset + 1,
               daysInMonth,
@@ -411,12 +408,13 @@ pw.Widget _monthCell(
   int daysInMonth,
   _ReportFonts fonts,
 ) {
+  final height = _monthCellHeight(data.legendEntries.length);
   if (dayNumber < 1 || dayNumber > daysInMonth) {
-    return pw.SizedBox(height: _monthCellHeight(data.legendEntries.length));
+    return pw.SizedBox(height: height);
   }
   final date = DateTime(month.year, month.month, dayNumber);
   if (date.isBefore(data.range.start) || date.isAfter(data.range.end)) {
-    return pw.SizedBox(height: _monthCellHeight(data.legendEntries.length));
+    return pw.SizedBox(height: height);
   }
   final marker = buildDayCellMarkerData(
     date: date,
@@ -427,7 +425,7 @@ pw.Widget _monthCell(
     entries: data.symptomEntries,
   );
   return pw.Container(
-    height: _monthCellHeight(data.legendEntries.length),
+    height: height,
     padding: const pw.EdgeInsets.all(2),
     decoration: date == data.today
         ? pw.BoxDecoration(border: pw.Border.all(width: 1.2))
@@ -495,7 +493,7 @@ pw.Widget _cycleTable(ReportData data, _ReportFonts fonts) => _textTable(
     for (var index = data.periods.length - 1; index >= 0; index--)
       [
         formatDate(data.periods[index].start),
-        '${calendarDaysBetween(data.periods[index].start, data.periods[index].end ?? data.today) + 1}',
+        '${recordedPeriodLength(data.periods[index], data.today)}',
         data.cycleLengths[index]?.toString() ??
             (data.periods[index].end == null ? 'open' : 'latest'),
       ],
@@ -682,8 +680,6 @@ pw.Widget _matrixCell(pw.Widget child) => pw.Padding(
 pw.Widget _textTable(
   List<List<String>> rows,
   _ReportFonts fonts, {
-  double fontSize = 10,
-  double horizontalPadding = 3,
   Map<int, pw.TableColumnWidth>? columnWidths,
 }) => pw.Table(
   border: pw.TableBorder(
@@ -699,10 +695,7 @@ pw.Widget _textTable(
         children: [
           for (final value in row.$2.indexed)
             pw.Padding(
-              padding: pw.EdgeInsets.symmetric(
-                horizontal: horizontalPadding,
-                vertical: 4,
-              ),
+              padding: pw.EdgeInsets.symmetric(horizontal: 3, vertical: 4),
               child: pw.Text(
                 value.$2,
                 textAlign: value.$1 == 0
@@ -710,7 +703,7 @@ pw.Widget _textTable(
                     : pw.TextAlign.right,
                 style: pw.TextStyle(
                   font: row.$1 == 0 ? fonts.monoMedium : fonts.mono,
-                  fontSize: row.$1 == 0 ? 9 : fontSize,
+                  fontSize: row.$1 == 0 ? 9 : 10,
                 ),
               ),
             ),
@@ -759,7 +752,7 @@ pw.Widget _medicationCourses(ReportData data, _ReportFonts fonts) {
                   ? '${formatDate(window.sourcePeriodStart!)} interval'
                   : '${formatDate(window.sourcePeriodStart!)} cycle'} · '
               '${formatDate(window.start)} - ${formatDate(window.end)}'
-              '${_adjustmentSuffix(data.windowAdjustments, legendEntry.medication.id!, window.sourcePeriodStart)}',
+              '${_adjustmentSuffix(adjustmentsByMedication[legendEntry.medication.id!] ?? const [], window.sourcePeriodStart)}',
               style: pw.TextStyle(font: fonts.mono, fontSize: 9),
             ),
           ),
@@ -788,7 +781,7 @@ pw.Widget _textureBand(
 }) => pw.CustomPaint(
   size: PdfPoint(width, height),
   painter: (canvas, size) {
-    final (mark, gap) = reportTextureMetrics(texture, size.x);
+    final (mark, gap) = MarkerTextureMetrics.forTexture(texture, size.x);
     canvas.setFillColor(PdfColors.black);
     for (var left = 0.0; left < size.x; left += mark + gap) {
       canvas.drawRect(left, 0, (left + mark).clamp(0, size.x) - left, size.y);
@@ -797,55 +790,53 @@ pw.Widget _textureBand(
   },
 );
 
-(double, double) reportTextureMetrics(
-  MarkerTexture texture,
-  double solidWidth,
-) => MarkerTextureMetrics.forTexture(texture, solidWidth);
-
 pw.Widget _symptomGlyph(int typeId) => pw.CustomPaint(
   size: const PdfPoint(7, 7),
   painter: (canvas, size) {
-    final shape = (typeId - 1) % 10;
-    final open = shape >= 5 && shape <= 8;
-    final base = open ? shape - 5 : shape;
+    final glyph = SymptomGlyph.forTypeId(typeId);
+    final open = switch (glyph) {
+      SymptomGlyph.circleOpen ||
+      SymptomGlyph.diamondOpen ||
+      SymptomGlyph.triangleOpen ||
+      SymptomGlyph.squareOpen => true,
+      _ => false,
+    };
     canvas
       ..setStrokeColor(PdfColors.black)
       ..setFillColor(PdfColors.black)
       ..setLineWidth(1);
-    if (shape == 9) {
-      canvas
-        ..drawLine(1, 1, 6, 6)
-        ..drawLine(1, 6, 6, 1)
-        ..strokePath();
-      return;
-    }
-    switch (base) {
-      case 0:
+    switch (glyph) {
+      case SymptomGlyph.circle:
+      case SymptomGlyph.circleOpen:
         canvas.drawEllipse(3.5, 3.5, 2.5, 2.5);
-        break;
-      case 1:
+      case SymptomGlyph.diamond:
+      case SymptomGlyph.diamondOpen:
         canvas
           ..moveTo(3.5, 0.7)
           ..lineTo(6.3, 3.5)
           ..lineTo(3.5, 6.3)
           ..lineTo(0.7, 3.5)
           ..closePath();
-        break;
-      case 2:
+      case SymptomGlyph.triangle:
+      case SymptomGlyph.triangleOpen:
         canvas
           ..moveTo(3.5, 0.7)
           ..lineTo(6.3, 6.3)
           ..lineTo(0.7, 6.3)
           ..closePath();
-        break;
-      case 3:
+      case SymptomGlyph.square:
+      case SymptomGlyph.squareOpen:
         canvas.drawRect(0.8, 0.8, 5.4, 5.4);
-        break;
-      default:
+      case SymptomGlyph.plus:
         canvas
           ..drawRect(2.7, 0.5, 1.6, 6)
           ..drawRect(0.5, 2.7, 6, 1.6);
-        break;
+      case SymptomGlyph.cross:
+        canvas
+          ..drawLine(1, 1, 6, 6)
+          ..drawLine(1, 6, 6, 1)
+          ..strokePath();
+        return;
     }
     if (open) {
       canvas.strokePath();
@@ -871,13 +862,11 @@ String _scheduleText(MedicationSchedule schedule) {
 
 String _adjustmentSuffix(
   List<WindowAdjustment> adjustments,
-  int medicationId,
   DateTime? sourcePeriodStart,
 ) {
   if (sourcePeriodStart == null) return '';
   for (final adjustment in adjustments) {
-    if (adjustment.medicationId == medicationId &&
-        adjustment.sourcePeriodStart == sourcePeriodStart) {
+    if (adjustment.sourcePeriodStart == sourcePeriodStart) {
       if (adjustment.kind == WindowAdjustmentKind.skipped) return ' · skipped';
       final started = adjustment.startDate == null
           ? ''
@@ -907,10 +896,12 @@ double _monthCellHeight(int medicationCount) =>
     45 + (medicationCount > 4 ? medicationCount - 4 : 0) * 4;
 
 const _rule = PdfColor.fromInt(0xffb3b3b3);
+const _pageMargin = 24.0;
 const _matrixNameWidth = 150.0;
 const _matrixAllWidth = 35.0;
 const _cycleDayWidth = 27.0;
 const _noCycleWidth = 55.0;
 const _monthWidth = 52.0;
 
-double get reportPortraitContentWidth => PdfPageFormat.a4.width - 48;
+double get reportPortraitContentWidth =>
+    PdfPageFormat.a4.width - _pageMargin * 2;

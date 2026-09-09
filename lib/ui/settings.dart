@@ -544,22 +544,23 @@ Future<int?> _chooseRange(
       mainAxisSize: MainAxisSize.min,
       children: [
         for (final months in const [1, 3, 6, 12])
-          ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: Dim.minTarget),
-            child: ListTile(
-              title: Text(
-                '$months ${months == 1 ? 'month' : 'months'}',
-                style: HmmmType.of(context).figureSmall,
-              ),
-              subtitle: Text(
-                _rangeDescription(rangeForMonths(today, months, rangeEnd)),
-                style: HmmmType.of(context).figureSmall.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+          if (rangeForMonths(today, months, rangeEnd) case final range)
+            ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: Dim.minTarget),
+              child: ListTile(
+                title: Text(
+                  '$months ${months == 1 ? 'month' : 'months'}',
+                  style: HmmmType.of(context).figureSmall,
                 ),
+                subtitle: Text(
+                  '${formatDate(range.start)} – ${formatDate(range.end)}',
+                  style: HmmmType.of(context).figureSmall.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                onTap: () => Navigator.pop(context, months),
               ),
-              onTap: () => Navigator.pop(context, months),
             ),
-          ),
       ],
     ),
   ),
@@ -594,15 +595,6 @@ Future<AppThemeMode?> _chooseThemeMode(BuildContext context) =>
         ),
       ),
     );
-
-DateRange rangeForMonths(DateTime today, int months, DateTime rangeEnd) =>
-    DateRange(
-      start: DateTime(today.year, today.month - months + 1),
-      end: rangeEnd.isAfter(today) ? rangeEnd : today,
-    );
-
-String _rangeDescription(DateRange range) =>
-    '${formatDate(range.start)} – ${formatDate(range.end)}';
 
 String _periodDetail(List<Period> periods) {
   if (periods.isEmpty) return '0 · no records';

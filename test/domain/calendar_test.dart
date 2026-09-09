@@ -108,11 +108,48 @@ void main() {
       Period(start: DateTime(2026, 6, 10)),
     ];
 
-    expect(periodDayForDate(DateTime(2026, 5, 29), periods, today: today), 1);
-    expect(periodDayForDate(DateTime(2026, 6, 2), periods, today: today), 5);
-    expect(periodDayForDate(DateTime(2026, 6, 12), periods, today: today), 3);
     expect(
-      periodDayForDate(DateTime(2026, 6, 9), periods, today: today),
+      buildDayCellMarkerData(
+        date: DateTime(2026, 5, 29),
+        today: today,
+        periods: periods,
+        windowsByMedicationId: const {},
+        laneByMedicationId: const {},
+        entries: const [],
+      ).periodDay,
+      1,
+    );
+    expect(
+      buildDayCellMarkerData(
+        date: DateTime(2026, 6, 2),
+        today: today,
+        periods: periods,
+        windowsByMedicationId: const {},
+        laneByMedicationId: const {},
+        entries: const [],
+      ).periodDay,
+      5,
+    );
+    expect(
+      buildDayCellMarkerData(
+        date: DateTime(2026, 6, 12),
+        today: today,
+        periods: periods,
+        windowsByMedicationId: const {},
+        laneByMedicationId: const {},
+        entries: const [],
+      ).periodDay,
+      3,
+    );
+    expect(
+      buildDayCellMarkerData(
+        date: DateTime(2026, 6, 9),
+        today: today,
+        periods: periods,
+        windowsByMedicationId: const {},
+        laneByMedicationId: const {},
+        entries: const [],
+      ).periodDay,
       isNull,
     );
   });

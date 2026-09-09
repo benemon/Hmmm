@@ -71,16 +71,41 @@ class _DayDetailSheetState extends State<DayDetailSheet> {
     final windows = await widget.medicationRepository.loadAdjustedWindows(
       medications: medications,
       periods: periods,
-      range: DateRange(start: DateTime(1, 1, 1), end: DateTime(9999, 12, 31)),
+      range: unboundedDateRange,
       today: widget.today,
     );
+    final adjustmentsByMedicationId = <int, Map<DateTime, WindowAdjustment>>{};
+    for (final adjustment in windows.adjustments) {
+      (adjustmentsByMedicationId[adjustment.medicationId] ??=
+              {})[adjustment.sourcePeriodStart] =
+          adjustment;
+    }
+    final medicationsWithWindows = [
+      for (final medication in medications)
+        if (medicationHasDerivableWindows(
+          medication,
+          periods,
+          today: widget.today,
+        ))
+          medication,
+    ];
     return _DayDetailData(
       periods: periods,
       medications: medications,
       types: types,
       entries: entries,
-      adjustments: windows.adjustments,
+      laneByMedicationId: laneAssignments(medicationsWithWindows),
+      adjustmentsByMedicationId: adjustmentsByMedicationId,
       windowsByMedicationId: windows.windowsByMedicationId,
+      unadjustedWindowsByMedicationId: {
+        for (final medication in medicationsWithWindows)
+          medication.id!: deriveWindows(
+            medication,
+            periods,
+            unboundedDateRange,
+            today: widget.today,
+          ),
+      },
     );
   }
 
@@ -97,7 +122,7 @@ class _DayDetailSheetState extends State<DayDetailSheet> {
       scopesRoute: true,
       namesRoute: true,
       explicitChildNodes: true,
-      label: 'Day detail, ${_formatLongDate(_initialDate)}',
+      label: 'Day detail, ${formatLongDate(_initialDate)}',
       child: DraggableScrollableSheet(
         expand: false,
         minChildSize: 0.50,
@@ -133,7 +158,7 @@ class _DayDetailSheetState extends State<DayDetailSheet> {
                         onPageChanged: (index) {
                           SemanticsService.sendAnnouncement(
                             View.of(context),
-                            _formatLongDate(_dateForPage(index)),
+                            formatLongDate(_dateForPage(index)),
                             Directionality.of(context),
                           );
                         },
@@ -201,16 +226,20 @@ class _DayDetailData {
     required this.medications,
     required this.types,
     required this.entries,
-    required this.adjustments,
+    required this.laneByMedicationId,
+    required this.adjustmentsByMedicationId,
     required this.windowsByMedicationId,
+    required this.unadjustedWindowsByMedicationId,
   });
 
   final List<Period> periods;
   final List<Medication> medications;
   final List<SymptomType> types;
   final List<SymptomEntry> entries;
-  final List<WindowAdjustment> adjustments;
+  final Map<int, int> laneByMedicationId;
+  final Map<int, Map<DateTime, WindowAdjustment>> adjustmentsByMedicationId;
   final Map<int, List<MedicationWindow>> windowsByMedicationId;
+  final Map<int, List<MedicationWindow>> unadjustedWindowsByMedicationId;
 }
 
 class _DayPage extends StatelessWidget {
@@ -254,7 +283,7 @@ class _DayPage extends StatelessWidget {
       for (final entry in data.entries)
         if (entry.date == date) entry.typeId: entry,
     };
-    final courses = _coursesForDate(date, data, today);
+    final courses = _coursesForDate(date, data);
     final activeCourseCount = courses.where((course) => course.active).length;
     final sortedTypes = [...data.types]
       ..sort((a, b) {
@@ -274,8 +303,6 @@ class _DayPage extends StatelessWidget {
         _DayHeader(
           date: date,
           cycleDay: cycleDay,
-          previousEnabled: onPrevious != null,
-          nextEnabled: onNext != null,
           onPrevious: onPrevious,
           onNext: onNext,
         ),
@@ -340,16 +367,12 @@ class _DayHeader extends StatelessWidget {
   const _DayHeader({
     required this.date,
     required this.cycleDay,
-    required this.previousEnabled,
-    required this.nextEnabled,
     required this.onPrevious,
     required this.onNext,
   });
 
   final DateTime date;
   final int? cycleDay;
-  final bool previousEnabled;
-  final bool nextEnabled;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
 
@@ -360,7 +383,7 @@ class _DayHeader extends StatelessWidget {
     liveRegion: true,
     header: true,
     label:
-        '${_formatLongDate(date)}. ${_weekdays[date.weekday - 1]}'
+        '${formatLongDate(date)}. ${_weekdays[date.weekday - 1]}'
         '${cycleDay == null ? '' : '. Cycle day $cycleDay'}',
     child: ConstrainedBox(
       constraints: const BoxConstraints(minHeight: Dim.daySheetHeaderHeight),
@@ -369,7 +392,7 @@ class _DayHeader extends StatelessWidget {
           Semantics(
             label: 'Previous day',
             button: true,
-            enabled: previousEnabled,
+            enabled: onPrevious != null,
             child: IconButton(
               key: const ValueKey('previous-day'),
               tooltip: 'Previous day',
@@ -402,7 +425,7 @@ class _DayHeader extends StatelessWidget {
           Semantics(
             label: 'Next day',
             button: true,
-            enabled: nextEnabled,
+            enabled: onNext != null,
             child: IconButton(
               key: const ValueKey('next-day'),
               tooltip: 'Next day',
@@ -477,7 +500,7 @@ class _PeriodBlock extends StatelessWidget {
     final covering = coveringClosedPeriod ?? coveringOpenPeriod;
     final recordedDays = covering == null
         ? null
-        : _recordedDayCount(covering, today);
+        : recordedPeriodLength(covering, today);
     final status = coveringClosedPeriod != null
         ? '${formatDate(coveringClosedPeriod!.start)} – '
               '${formatDate(coveringClosedPeriod!.end!)}'
@@ -547,8 +570,7 @@ class _PeriodBlock extends StatelessWidget {
       builder: (context) => AlertDialog(
         title: const Text('Delete period record?'),
         content: Text(
-          '${formatDate(period.start)} – '
-          '${period.end == null ? 'open' : formatDate(period.end!)}\n\n'
+          '${formatPeriodRange(period.start, period.end)}\n\n'
           'Derived medication windows from this start are removed too.',
           style: HmmmType.of(context).figure,
         ),
@@ -834,12 +856,9 @@ class _SymptomsBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final oneColumn =
-        MediaQuery.textScalerOf(context).scale(1) >= Dim.singleColumnTextScale;
-    final chipHeight = math.max(
-      Dim.minTarget,
-      MediaQuery.textScalerOf(context).scale(22) + Dim.s6,
-    );
+    final textScaler = MediaQuery.textScalerOf(context);
+    final oneColumn = textScaler.scale(1) >= Dim.singleColumnTextScale;
+    final chipHeight = math.max(Dim.minTarget, textScaler.scale(22) + Dim.s6);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -942,14 +961,15 @@ class _SymptomsBlock extends StatelessWidget {
   }
 
   Future<void> _addSymptomType(BuildContext context) async {
-    final controller = TextEditingController();
+    var typeName = '';
     final name = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Symptom type'),
         content: TextField(
-          controller: controller,
+          key: const ValueKey('symptom-type-name'),
           autofocus: true,
+          onChanged: (value) => typeName = value,
           decoration: const InputDecoration(labelText: 'Name'),
         ),
         actions: [
@@ -958,13 +978,13 @@ class _SymptomsBlock extends StatelessWidget {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            key: const ValueKey('confirm-add-symptom-type'),
+            onPressed: () => Navigator.pop(context, typeName.trim()),
             child: const Text('Add'),
           ),
         ],
       ),
     );
-    controller.dispose();
     if (name == null || !context.mounted) return;
     try {
       await repository.insertType(SymptomType(name: name, builtin: false));
@@ -1123,41 +1143,20 @@ class _DashedRoundedBorderPainter extends CustomPainter {
 
 enum _CourseAction { startedOn, endedEarly, skipped, restore }
 
-List<_MedicationCourse> _coursesForDate(
-  DateTime date,
-  _DayDetailData data,
-  DateTime today,
-) {
-  final lanes = laneAssignments([
-    for (final medication in data.medications)
-      if (medicationHasDerivableWindows(medication, data.periods, today: today))
-        medication,
-  ]);
+List<_MedicationCourse> _coursesForDate(DateTime date, _DayDetailData data) {
   final courses = <_MedicationCourse>[];
-  final fullRange = DateRange(
-    start: DateTime(1, 1, 1),
-    end: DateTime(9999, 12, 31),
-  );
   for (final medication in data.medications) {
-    final lane = lanes[medication.id];
+    final lane = data.laneByMedicationId[medication.id];
     if (lane == null) continue;
-    final unadjustedWindows = deriveWindows(
-      medication,
-      data.periods,
-      fullRange,
-      today: today,
-    );
+    final adjustmentsBySourcePeriod =
+        data.adjustmentsByMedicationId[medication.id] ?? const {};
+    final unadjustedWindows =
+        data.unadjustedWindowsByMedicationId[medication.id]!;
     for (final window in unadjustedWindows) {
       final source = window.sourcePeriodStart;
       final adjustment = source == null
           ? null
-          : data.adjustments
-                .where(
-                  (candidate) =>
-                      candidate.medicationId == medication.id &&
-                      candidate.sourcePeriodStart == source,
-                )
-                .firstOrNull;
+          : adjustmentsBySourcePeriod[source];
       final active =
           data.windowsByMedicationId[medication.id]?.any(
             (adjusted) =>
@@ -1181,10 +1180,9 @@ List<_MedicationCourse> _coursesForDate(
             previousStart: source == null
                 ? null
                 : previousAdjustedCourseStart(
-                    medicationId: medication.id!,
                     sourcePeriodStart: source,
                     unadjustedWindows: unadjustedWindows,
-                    adjustments: data.adjustments,
+                    adjustmentsBySourcePeriod: adjustmentsBySourcePeriod,
                   ),
           ),
         );
@@ -1196,16 +1194,16 @@ List<_MedicationCourse> _coursesForDate(
 
 String _courseDerivation(_MedicationCourse course) {
   final schedule = course.medication.schedule;
+  final previousStart = course.previousStart;
+  final spacing = previousStart == null
+      ? ''
+      : ' · ${calendarDaysBetween(previousStart, course.adjustment?.startDate ?? course.window.start)} '
+            'days since last course started';
   if (schedule is CyclicalMedicationSchedule) {
     final lastDay = schedule.startCycleDay + schedule.durationDays - 1;
-    final previousStart = course.previousStart;
-    final spacing = previousStart == null
-        ? ''
-        : ' · ${calendarDaysBetween(previousStart, course.adjustment?.startDate ?? course.window.start)} '
-              'days since last course started';
     return 'day ${schedule.startCycleDay}–$lastDay of the '
-        '${_formatDayMonth(course.window.sourcePeriodStart!)} cycle · '
-        'starts ${_formatDayMonth(course.window.start)}$spacing';
+        '${formatDayMonth(course.window.sourcePeriodStart!)} cycle · '
+        'starts ${formatDayMonth(course.window.start)}$spacing';
   }
   if (schedule is FixedIntervalMedicationSchedule) {
     final courseNumber =
@@ -1215,11 +1213,6 @@ String _courseDerivation(_MedicationCourse course) {
             ) ~/
             schedule.intervalDays +
         1;
-    final previousStart = course.previousStart;
-    final spacing = previousStart == null
-        ? ''
-        : ' · ${calendarDaysBetween(previousStart, course.adjustment?.startDate ?? course.window.start)} '
-              'days since last course started';
     return 'course $courseNumber · started ${formatDate(course.window.start)} '
         'by interval$spacing';
   }
@@ -1229,9 +1222,6 @@ String _courseDerivation(_MedicationCourse course) {
       : 'continuous ${formatDate(continuous.start)} – '
             '${formatDate(continuous.end!)}';
 }
-
-int _recordedDayCount(Period period, DateTime today) =>
-    calendarDaysBetween(period.start, period.end ?? today) + 1;
 
 String? _nearestStartText(DateTime date, List<Period> periods) {
   if (periods.isEmpty) return null;
@@ -1248,12 +1238,6 @@ String? _nearestStartText(DateTime date, List<Period> periods) {
   return 'nearest start ${formatDate(nearest)} · $distance '
       '${distance == 1 ? 'day' : 'days'} $direction';
 }
-
-String _formatLongDate(DateTime date) =>
-    '${date.day} ${monthsFull[date.month - 1]} ${date.year}';
-
-String _formatDayMonth(DateTime date) =>
-    '${date.day} ${monthsShort[date.month - 1]}';
 
 const _weekdays = [
   'Monday',

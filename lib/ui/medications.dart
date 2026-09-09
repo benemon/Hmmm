@@ -535,7 +535,7 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
                   const SizedBox(width: Dim.s1),
                   Expanded(
                     child: Text(
-                      derivation.substring(2),
+                      derivation,
                       style: HmmmType.of(context).figureSmall,
                     ),
                   ),
@@ -635,7 +635,7 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
 
   String _derivationLine() {
     if (_scheduleType == _ScheduleType.continuous) {
-      return '→ continuous since ${formatDate(_continuousStart)}'
+      return 'continuous since ${formatDate(_continuousStart)}'
           '${_continuousEnd == null ? '' : ' to ${formatDate(_continuousEnd!)}'}';
     }
     if (_scheduleType == _ScheduleType.fixedInterval) {
@@ -645,17 +645,17 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
           duration == null ||
           interval < 1 ||
           duration < 1) {
-        return '→ enter an interval and duration';
+        return 'enter an interval and duration';
       }
-      return '→ $duration days every $interval days from '
+      return '$duration days every $interval days from '
           '${formatDate(_intervalAnchor)}';
     }
     final start = int.tryParse(_cycleDayController.text);
     final duration = int.tryParse(_durationController.text);
     if (start == null || duration == null || start < 1 || duration < 1) {
-      return '→ enter a cycle day and duration';
+      return 'enter a cycle day and duration';
     }
-    return '→ cycle day $start to ${start + duration - 1}, '
+    return 'cycle day $start to ${start + duration - 1}, '
         '$duration days per recorded cycle';
   }
 
@@ -768,7 +768,7 @@ class _RequiredDateField extends StatelessWidget {
       child: _DateControl(
         value: formatDate(value),
         onTap: () async {
-          final selected = await _pickDate(context, value, today);
+          final selected = await pickDate(context, value, today);
           if (selected != null) onChanged(selected);
         },
       ),
@@ -796,7 +796,7 @@ class _OptionalDateField extends StatelessWidget {
       child: _DateControl(
         value: value == null ? 'not set' : formatDate(value!),
         onTap: () async {
-          final selected = await _pickDate(context, value ?? today, today);
+          final selected = await pickDate(context, value ?? today, today);
           if (selected != null) onChanged(selected);
         },
         onClear: value == null ? null : () => onChanged(null),
@@ -845,17 +845,6 @@ class _DateControl extends StatelessWidget {
     );
   }
 }
-
-Future<DateTime?> _pickDate(
-  BuildContext context,
-  DateTime initialDate,
-  DateTime today,
-) => showDatePicker(
-  context: context,
-  initialDate: initialDate,
-  firstDate: DateTime(1900),
-  lastDate: today,
-);
 
 Medication _stoppedMedication(Medication medication, DateTime today) {
   final schedule = medication.schedule;

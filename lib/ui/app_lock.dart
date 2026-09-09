@@ -91,14 +91,9 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
                 const SizedBox(height: Dim.s1),
                 Text(
                   'device authentication required',
-                  style:
-                      const TextStyle(
-                        fontFamily: 'DM Mono',
-                        fontSize: 13,
-                        height: 18 / 13,
-                      ).copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                  style: HmmmType.of(context).figureSmall.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: Dim.s5),
                 SizedBox(

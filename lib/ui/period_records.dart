@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
 import '../data/period_repository.dart';
+import '../domain/calendar.dart';
 import '../domain/cycle_lengths.dart';
-import '../domain/dates.dart';
 import '../domain/models.dart';
 import 'empty_state.dart';
 import 'feedback.dart';
@@ -125,8 +125,7 @@ class _PeriodList extends StatelessWidget {
       itemBuilder: (context, index) {
         final record = newestFirst[index];
         final period = record.period;
-        final duration =
-            calendarDaysBetween(period.start, period.end ?? today) + 1;
+        final duration = recordedPeriodLength(period, today);
         return Dismissible(
           key: ValueKey('period-${period.id}'),
           direction: DismissDirection.endToStart,
@@ -168,8 +167,7 @@ class _PeriodList extends StatelessWidget {
               constraints: const BoxConstraints(minHeight: Dim.rowMinHeight),
               child: ListTile(
                 title: Text(
-                  '${formatDate(period.start)} – '
-                  '${period.end == null ? 'open' : formatDate(period.end!)}',
+                  formatPeriodRange(period.start, period.end),
                   style: HmmmType.of(context).figure,
                 ),
                 subtitle: Text(
@@ -206,8 +204,7 @@ class _PeriodList extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '${formatDate(period.start)} – '
-                '${period.end == null ? 'open' : formatDate(period.end!)}',
+                formatPeriodRange(period.start, period.end),
                 style: HmmmType.of(context).figure,
               ),
               const SizedBox(height: Dim.s1),
@@ -302,22 +299,12 @@ class _PeriodDialogState extends State<_PeriodDialog> {
   }
 
   Future<void> _pickStart() async {
-    final selected = await showDatePicker(
-      context: context,
-      initialDate: _start,
-      firstDate: DateTime(1900),
-      lastDate: widget.today,
-    );
+    final selected = await pickDate(context, _start, widget.today);
     if (selected != null) setState(() => _start = selected);
   }
 
   Future<void> _pickEnd() async {
-    final selected = await showDatePicker(
-      context: context,
-      initialDate: _end ?? _start,
-      firstDate: DateTime(1900),
-      lastDate: widget.today,
-    );
+    final selected = await pickDate(context, _end ?? _start, widget.today);
     if (selected != null) setState(() => _end = selected);
   }
 }

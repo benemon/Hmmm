@@ -56,16 +56,17 @@ class SymptomRepository extends ChangeNotifier {
     };
   }
 
-  Future<SymptomEntry?> upsertEntry(
+  Future<void> upsertEntry(
     SymptomEntry entry, {
     required DateTime today,
   }) async {
-    if (entry.date.isAfter(dateOnly(today))) {
-      throw ArgumentError('Symptom date cannot be in the future.');
-    }
     if (entry.severity == 0) {
-      await _clearEntry(entry.date, entry.typeId);
-      return null;
+      await _database.rawDelete(
+        'DELETE FROM symptom_entries WHERE date = ? AND type_id = ?',
+        [dateToIso(entry.date), entry.typeId],
+      );
+      notifyListeners();
+      return;
     }
     validateSymptomEntry(entry, today: today);
     final iso = dateToIso(entry.date);
@@ -78,24 +79,6 @@ class SymptomRepository extends ChangeNotifier {
         note = excluded.note
       ''',
       [iso, entry.typeId, entry.severity, entry.note],
-    );
-    final rows = await _database.rawQuery(
-      '''
-      SELECT id, date, type_id, severity, note
-      FROM symptom_entries
-      WHERE date = ? AND type_id = ?
-      LIMIT 1
-      ''',
-      [iso, entry.typeId],
-    );
-    notifyListeners();
-    return _symptomEntryFromRow(rows.single);
-  }
-
-  Future<void> _clearEntry(DateTime date, int typeId) async {
-    await _database.rawDelete(
-      'DELETE FROM symptom_entries WHERE date = ? AND type_id = ?',
-      [dateToIso(date), typeId],
     );
     notifyListeners();
   }

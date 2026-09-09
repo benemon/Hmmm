@@ -233,7 +233,6 @@ abstract final class Dim {
   static const rowMinHeight = 56.0;
   static const tableRowMinHeight = 44.0;
 
-  static const appBarHeight = 56.0;
   static const legendHeight = 40.0;
   static const weekdayRowHeight = 24.0;
   static const monthBandHeight = 32.0;

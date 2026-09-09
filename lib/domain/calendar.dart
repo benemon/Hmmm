@@ -48,6 +48,9 @@ Map<int, int> laneAssignments(List<Medication> medicationsWithWindows) {
   return {for (var lane = 0; lane < ids.length; lane++) ids[lane]: lane};
 }
 
+int recordedPeriodLength(Period period, DateTime today) =>
+    calendarDaysBetween(period.start, period.end ?? today) + 1;
+
 DayCellMarkerData buildDayCellMarkerData({
   required DateTime date,
   required DateTime today,
@@ -107,22 +110,6 @@ DayCellMarkerData buildDayCellMarkerData({
         ? symptomTypeIds.length - visibleDayCellSymptomLimit
         : 0,
   );
-}
-
-int? periodDayForDate(
-  DateTime date,
-  List<Period> periods, {
-  required DateTime today,
-}) {
-  final day = dateOnly(date);
-  final currentDate = dateOnly(today);
-  for (final period in periods) {
-    final end = period.end ?? currentDate;
-    if (!day.isBefore(period.start) && !day.isAfter(end)) {
-      return calendarDaysBetween(period.start, day) + 1;
-    }
-  }
-  return null;
 }
 
 int? cycleDayForDate(DateTime date, List<Period> periods) {

@@ -5,10 +5,7 @@ abstract interface class AppAuthenticator {
 }
 
 class LocalAppAuthenticator implements AppAuthenticator {
-  LocalAppAuthenticator({LocalAuthentication? localAuthentication})
-    : _localAuthentication = localAuthentication ?? LocalAuthentication();
-
-  final LocalAuthentication _localAuthentication;
+  final LocalAuthentication _localAuthentication = LocalAuthentication();
 
   @override
   Future<bool> authenticate() => _localAuthentication.authenticate(

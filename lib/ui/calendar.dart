@@ -74,23 +74,30 @@ class _CalendarScreenState extends State<CalendarScreen> {
           currentMonth.year,
           currentMonth.month - _pastMonthCount,
         ),
-        end: DateTime(9999, 12, 31),
+        end: unboundedDateRange.end,
       ),
       today: widget.today,
     );
+    final adjustmentsByMedicationId = <int, Map<DateTime, WindowAdjustment>>{};
+    for (final adjustment in windows.adjustments) {
+      (adjustmentsByMedicationId[adjustment.medicationId] ??=
+              {})[adjustment.sourcePeriodStart] =
+          adjustment;
+    }
     return _CalendarData(
       periods: periods,
       medications: medications,
       types: types,
       entries: entries,
-      adjustments: windows.adjustments,
+      laneByMedicationId: laneAssignments(medications),
+      adjustmentsByMedicationId: adjustmentsByMedicationId,
       windowsByMedicationId: windows.windowsByMedicationId,
       unadjustedWindowsByMedicationId: {
         for (final medication in medications)
           medication.id!: deriveWindows(
             medication,
             periods,
-            DateRange(start: DateTime(1, 1, 1), end: DateTime(9999, 12, 31)),
+            unboundedDateRange,
             today: widget.today,
           ),
       },
@@ -121,9 +128,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
           final agendaMode =
               MediaQuery.textScalerOf(context).scale(1) >=
               Dim.agendaModeTextScale;
-          final laneByMedicationId = laneAssignments(
-            data?.medications ?? const [],
-          );
+          final laneByMedicationId = data?.laneByMedicationId ?? const {};
           if (data != null) {
             final layout = (
               agendaMode,
@@ -262,7 +267,8 @@ class _CalendarData {
     required this.medications,
     required this.types,
     required this.entries,
-    required this.adjustments,
+    required this.laneByMedicationId,
+    required this.adjustmentsByMedicationId,
     required this.windowsByMedicationId,
     required this.unadjustedWindowsByMedicationId,
     required this.finalMonth,
@@ -272,7 +278,8 @@ class _CalendarData {
   final List<Medication> medications;
   final List<SymptomType> types;
   final List<SymptomEntry> entries;
-  final List<WindowAdjustment> adjustments;
+  final Map<int, int> laneByMedicationId;
+  final Map<int, Map<DateTime, WindowAdjustment>> adjustmentsByMedicationId;
   final Map<int, List<MedicationWindow>> windowsByMedicationId;
   final Map<int, List<MedicationWindow>> unadjustedWindowsByMedicationId;
   final DateTime finalMonth;
@@ -290,11 +297,15 @@ class _CalendarLegend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final markers = Markers.of(context);
+    final medicationsWithLanes = [
+      for (final medication in medications)
+        (medication, markers.lane(laneByMedicationId[medication.id!]!)),
+    ];
     final semantics = [
       'Legend.',
       'Period.',
-      for (final medication in medications)
-        '${markers.lane(laneByMedicationId[medication.id!]!).label} '
+      for (final (medication, lane) in medicationsWithLanes)
+        '${lane.label} '
             '${medication.name}${medication.active ? '' : ' stopped'}.',
       'Symptoms shown as shapes.',
     ].join(' ');
@@ -326,18 +337,12 @@ class _CalendarLegend extends StatelessWidget {
                     height: Dim.periodBandHeight,
                     name: 'Period',
                   ),
-                  for (final medication in medications)
+                  for (final (medication, lane) in medicationsWithLanes)
                     _LegendItem(
-                      color: markers
-                          .lane(laneByMedicationId[medication.id!]!)
-                          .color,
-                      texture: markers
-                          .lane(laneByMedicationId[medication.id!]!)
-                          .texture,
+                      color: lane.color,
+                      texture: lane.texture,
                       height: Dim.laneBandHeight,
-                      laneLabel: markers
-                          .lane(laneByMedicationId[medication.id!]!)
-                          .label,
+                      laneLabel: lane.label,
                       name: medication.active
                           ? medication.name
                           : '${medication.name} (stopped)',
@@ -601,6 +606,7 @@ class _MonthStripState extends State<_MonthStrip> {
       for (final medication in widget.data.medications)
         medication.id!: medication,
     };
+    final monthExtent = Dim.monthExtent(widget.data.medications.length);
     return KeyboardListener(
       focusNode: _dragFocusNode,
       onKeyEvent: _handleKeyEvent,
@@ -645,13 +651,9 @@ class _MonthStripState extends State<_MonthStrip> {
                   key: const ValueKey('calendar-grid'),
                   controller: widget.scrollController,
                   padding: EdgeInsets.only(
-                    bottom: math.max(
-                      0,
-                      constraints.maxHeight -
-                          Dim.monthExtent(widget.data.medications.length),
-                    ),
+                    bottom: math.max(0, constraints.maxHeight - monthExtent),
                   ),
-                  itemExtent: Dim.monthExtent(widget.data.medications.length),
+                  itemExtent: monthExtent,
                   itemCount: _months.length,
                   itemBuilder: (context, index) =>
                       _buildMonth(index, typeById, medicationById),
@@ -729,13 +731,9 @@ class _MonthStripState extends State<_MonthStrip> {
       final window = widget.data.unadjustedWindowsByMedicationId[medication.id]!
           .where((candidate) => candidate.sourcePeriodStart == source)
           .first;
-      final adjustment = widget.data.adjustments
-          .where(
-            (candidate) =>
-                candidate.medicationId == medication.id &&
-                candidate.sourcePeriodStart == source,
-          )
-          .firstOrNull;
+      final adjustmentsBySourcePeriod =
+          widget.data.adjustmentsByMedicationId[medication.id] ?? const {};
+      final adjustment = adjustmentsBySourcePeriod[source];
       return _CourseDrag(
         medication: medication,
         window: window,
@@ -744,11 +742,10 @@ class _MonthStripState extends State<_MonthStrip> {
         laneIndex: dayMarker.laneIndex,
         grabbedDate: date,
         previousStart: previousAdjustedCourseStart(
-          medicationId: medication.id!,
           sourcePeriodStart: source,
           unadjustedWindows:
               widget.data.unadjustedWindowsByMedicationId[medication.id]!,
-          adjustments: widget.data.adjustments,
+          adjustmentsBySourcePeriod: adjustmentsBySourcePeriod,
         ),
       );
     }
@@ -939,17 +936,17 @@ class _MonthSection extends StatelessWidget {
     return Column(
       children: [
         for (var day = 1; day <= daysInMonth; day++)
-          if (_marker(DateTime(month.year, month.month, day)) case final marker
-              when _carriesRecords(marker))
-            _AgendaDayRow(
-              date: DateTime(month.year, month.month, day),
-              today: today,
-              marker: marker,
-              entries: entries,
-              typeById: typeById,
-              medicationById: medicationById,
-              onTap: () => onDayTap(DateTime(month.year, month.month, day)),
-            ),
+          if (DateTime(month.year, month.month, day) case final date)
+            if (_marker(date) case final marker when _carriesRecords(marker))
+              _AgendaDayRow(
+                date: date,
+                today: today,
+                marker: marker,
+                entries: entries,
+                typeById: typeById,
+                medicationById: medicationById,
+                onTap: () => onDayTap(date),
+              ),
       ],
     );
   }
@@ -1083,7 +1080,11 @@ class _DayCellState extends State<_DayCell> {
                       ),
                     ),
                   ),
-                _DayCellContents(widget: widget),
+                _DayCellContents(
+                  date: widget.date,
+                  marker: widget.marker,
+                  medicationCount: widget.medicationCount,
+                ),
               ],
             ),
           ),
@@ -1108,7 +1109,12 @@ class _DayCellState extends State<_DayCell> {
 
     return Semantics(
       button: true,
-      label: _daySemantics(widget),
+      label: _daySemanticsData(
+        widget.date,
+        widget.today,
+        widget.marker,
+        widget.medicationById,
+      ),
       child: ExcludeSemantics(
         child: DragTarget<_CourseDrag>(
           onMove: (_) => widget.onDragMoved(widget.date),
@@ -1122,13 +1128,20 @@ class _DayCellState extends State<_DayCell> {
 }
 
 class _DayCellContents extends StatelessWidget {
-  const _DayCellContents({required this.widget});
+  const _DayCellContents({
+    required this.date,
+    required this.marker,
+    required this.medicationCount,
+  });
 
-  final _DayCell widget;
+  final DateTime date;
+  final DayCellMarkerData marker;
+  final int medicationCount;
 
   @override
   Widget build(BuildContext context) {
     final markers = Markers.of(context);
+    final dateIso = dateToIso(date);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1138,46 +1151,45 @@ class _DayCellContents extends StatelessWidget {
             right: Dim.s1,
             top: Dim.s1,
           ),
-          child: Text(
-            '${widget.date.day}',
-            style: HmmmType.of(context).dayNumber,
-          ),
+          child: Text('${date.day}', style: HmmmType.of(context).dayNumber),
         ),
         const SizedBox(height: Dim.s1),
         SizedBox(
           height: Dim.periodBandHeight,
-          child: widget.marker.inPeriod
+          child: marker.inPeriod
               ? MarkerBand(
                   color: markers.period,
                   height: Dim.periodBandHeight,
                   texture: MarkerTexture.solid,
-                  capStart: widget.marker.startsPeriod,
-                  capEnd: widget.marker.endsPeriod,
+                  capStart: marker.startsPeriod,
+                  capEnd: marker.endsPeriod,
                 )
               : null,
         ),
         const SizedBox(height: Dim.s1),
         SizedBox(
-          height: widget.medicationCount * Dim.lanePitch,
+          height: medicationCount * Dim.lanePitch,
           child: Stack(
             children: [
-              for (final medication in widget.marker.medicationMarkers)
+              for (final medication in marker.medicationMarkers)
                 Positioned(
                   key: ValueKey(
-                    'medication-band-${dateToIso(widget.date)}-'
+                    'medication-band-$dateIso-'
                     '${medication.medicationId}',
                   ),
                   top: medication.laneIndex * Dim.lanePitch,
                   left: 0,
                   right: 0,
                   height: Dim.laneBandHeight,
-                  child: MarkerBand(
-                    color: markers.lane(medication.laneIndex).color,
-                    height: Dim.laneBandHeight,
-                    texture: markers.lane(medication.laneIndex).texture,
-                    capStart: medication.startsWindow,
-                    capEnd: medication.endsWindow,
-                  ),
+                  child: switch (markers.lane(medication.laneIndex)) {
+                    final lane => MarkerBand(
+                      color: lane.color,
+                      height: Dim.laneBandHeight,
+                      texture: lane.texture,
+                      capStart: medication.startsWindow,
+                      capEnd: medication.endsWindow,
+                    ),
+                  },
                 ),
             ],
           ),
@@ -1190,14 +1202,14 @@ class _DayCellContents extends StatelessWidget {
             child: Row(
               children: [
                 for (final (index, typeId)
-                    in widget.marker.visibleSymptomTypeIds.indexed) ...[
+                    in marker.visibleSymptomTypeIds.indexed) ...[
                   SymptomGlyphMark(typeId: typeId, size: Dim.glyphSizeCalendar),
-                  if (index < widget.marker.visibleSymptomTypeIds.length - 1)
+                  if (index < marker.visibleSymptomTypeIds.length - 1)
                     const SizedBox(width: 3),
                 ],
-                if (widget.marker.symptomOverflowCount > 0)
+                if (marker.symptomOverflowCount > 0)
                   Text(
-                    '+${widget.marker.symptomOverflowCount}',
+                    '+${marker.symptomOverflowCount}',
                     style: Theme.of(context).textTheme.labelSmall
                         ?.copyWith(letterSpacing: 0),
                   ),
@@ -1234,16 +1246,14 @@ class _CourseDragFeedback extends StatelessWidget {
           ? fullEnd
           : recordedEnd;
       final spanDays = calendarDaysBetween(start, end) + 1;
-      final cellWidth = MediaQuery.sizeOf(context).width / 7;
-      final bandWidth = math.min(
-        MediaQuery.sizeOf(context).width - Dim.s7,
-        cellWidth * spanDays,
-      );
+      final width = MediaQuery.sizeOf(context).width;
+      final cellWidth = width / 7;
+      final bandWidth = math.min(width - Dim.s7, cellWidth * spanDays);
       final daysSince = drag.previousStart == null
           ? null
           : calendarDaysBetween(drag.previousStart!, start);
       final label =
-          'starts ${_formatDropDate(start)}'
+          'starts ${formatDayMonth(start)}'
           '${daysSince == null ? '' : ' · $daysSince days since last course started'}';
       final lane = Markers.of(context).lane(drag.laneIndex);
       return TweenAnimationBuilder<double>(
@@ -1444,13 +1454,6 @@ class _AgendaLaneChip extends StatelessWidget {
   }
 }
 
-String _daySemantics(_DayCell widget) => _daySemanticsData(
-  widget.date,
-  widget.today,
-  widget.marker,
-  widget.medicationById,
-);
-
 String _daySemanticsData(
   DateTime date,
   DateTime today,
@@ -1458,7 +1461,7 @@ String _daySemanticsData(
   Map<int, Medication> medicationById,
 ) {
   final clauses = <String>[
-    '${date.day} ${monthsFull[date.month - 1]} ${date.year}',
+    formatLongDate(date),
     if (marker.periodDay != null) 'Period day ${marker.periodDay}',
     if (marker.medicationMarkers.isNotEmpty)
       marker.medicationMarkers
@@ -1510,6 +1513,3 @@ DateTime _lastDerivedMonth(
   }
   return DateTime(lastDate.year, lastDate.month);
 }
-
-String _formatDropDate(DateTime date) =>
-    '${date.day} ${monthsShort[date.month - 1]}';

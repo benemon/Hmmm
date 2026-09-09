@@ -6,6 +6,7 @@ import 'package:hmmm/app_authenticator.dart';
 import 'package:hmmm/data/database.dart';
 import 'package:hmmm/data/settings_repository.dart';
 import 'package:hmmm/ui/app_lock.dart';
+import 'package:hmmm/ui/theme.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -25,6 +26,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        theme: hmmmTheme(Brightness.light),
         home: AppLockGate(
           settingsRepository: settings,
           authenticator: authenticator,
