@@ -14,9 +14,10 @@ Offline period, HRT, and symptom tracker for Android, built with Flutter.
   their historical windows. Individual courses can be moved to a different
   start date, ended early, skipped, or restored.
 - Data lives in a local SQLite database. Release builds request no network
-  permission, and Android cloud backup is disabled. Data leaves the device
-  only through an export or print you start yourself: calendar (.ics), backup
-  (.json, which can also be imported back), or PDF report.
+  permission, and Android cloud backup is disabled. Phone-to-phone transfer
+  during device setup carries the data across. Otherwise data leaves the
+  device only through an export or print you start yourself: calendar (.ics),
+  backup (.json, which can also be imported back), or PDF report.
 
 Brand assets live in [`brand/`](brand/) with usage rules in
 [`brand/README.md`](brand/README.md).
