@@ -12,11 +12,32 @@ const _allowedPlugins = {
 };
 
 void main() {
-  test('release manifest requests no network permission and no backup', () {
+  test('release manifest requests no network permission', () {
     final manifest = File('android/app/src/main/AndroidManifest.xml')
         .readAsStringSync();
     expect(manifest, isNot(contains('android.permission.INTERNET')));
-    expect(manifest, contains('android:allowBackup="false"'));
+  });
+
+  test('cloud backup excludes every app file; device transfer stays open', () {
+    final manifest = File('android/app/src/main/AndroidManifest.xml')
+        .readAsStringSync();
+    expect(manifest, contains('android:fullBackupContent="@xml/backup_rules"'));
+    expect(
+      manifest,
+      contains('android:dataExtractionRules="@xml/data_extraction_rules"'),
+    );
+    final rules = File('android/app/src/main/res/xml/data_extraction_rules.xml')
+        .readAsStringSync();
+    final cloud = RegExp(
+      r'<cloud-backup>(.*?)</cloud-backup>',
+      dotAll: true,
+    ).firstMatch(rules)!.group(1)!;
+    expect(cloud, contains('<exclude domain="root" path="." />'));
+    expect(cloud, isNot(contains('<include')));
+    final legacy = File('android/app/src/main/res/xml/backup_rules.xml')
+        .readAsStringSync();
+    expect(legacy, contains('<exclude domain="root" path="." />'));
+    expect(legacy, isNot(contains('<include')));
   });
 
   test('runtime dependencies stay within the allowed plugin list', () {
