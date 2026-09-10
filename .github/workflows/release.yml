@@ -43,4 +43,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "$out/hmmm-$version-arm64-v8a-release.apk#Hmmm $GITHUB_REF_NAME (arm64, most phones)" \
             "$out/hmmm-$version-release.apk#Hmmm $GITHUB_REF_NAME (universal)" \
-            --verify-tag --title "$GITHUB_REF_NAME" --notes-from-tag
+            --verify-tag --title "$GITHUB_REF_NAME" \
+            --notes "$(git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME")"
