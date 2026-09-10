@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hmmm/data/database.dart';
 import 'package:hmmm/data/medication_repository.dart';
@@ -309,6 +311,38 @@ void main() {
     expect(range.end, DateTime(2026, 6, 27));
     expect(output, contains('DTSTART;VALUE=DATE:20260616'));
     expect(output, contains('DTEND;VALUE=DATE:20260628'));
+  });
+
+  test('content lines are folded at 75 octets and unfold to the source', () {
+    const name =
+        'Estradiol hemihydrate transdermal patch 50 micrograms per 24 hours, '
+        'twice weekly, brand name pending — prescribed 2026';
+    final output = buildIcs(
+      periods: const [],
+      windowsByMedication: [
+        IcsMedicationWindows(
+          name: name,
+          windows: [
+            MedicationWindow(
+              start: DateTime(2026, 5, 20),
+              end: DateTime(2026, 5, 31),
+              sourcePeriodStart: DateTime(2026, 5, 10),
+            ),
+          ],
+        ),
+      ],
+      symptomDaysByType: const [],
+      range: DateRange(start: DateTime(2026, 5, 1), end: DateTime(2026, 5, 31)),
+      exportedAt: DateTime(2026, 6, 1),
+    );
+
+    final lines = output.split('\r\n');
+    for (final line in lines) {
+      expect(utf8.encode(line).length, lessThanOrEqualTo(75), reason: line);
+    }
+    expect(lines.where((line) => line.startsWith(' ')), isNotEmpty);
+    final unfolded = output.replaceAll('\r\n ', '');
+    expect(unfolded, contains('SUMMARY:${name.replaceAll(',', r'\,')}'));
   });
 
   test('open period ends on the export date, not the range end', () {

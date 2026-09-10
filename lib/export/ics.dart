@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../domain/dates.dart';
 import '../domain/hrt_window.dart';
 import '../domain/models.dart';
@@ -77,7 +79,24 @@ String buildIcs({
   }
 
   lines.add('END:VCALENDAR');
-  return '${lines.join('\r\n')}\r\n';
+  return '${lines.expand(_fold).join('\r\n')}\r\n';
+}
+
+Iterable<String> _fold(String line) sync* {
+  var buffer = StringBuffer();
+  var octets = 0;
+  for (final rune in line.runes) {
+    final char = String.fromCharCode(rune);
+    final length = utf8.encode(char).length;
+    if (octets + length > 75) {
+      yield buffer.toString();
+      buffer = StringBuffer(' ');
+      octets = 1;
+    }
+    buffer.write(char);
+    octets += length;
+  }
+  yield buffer.toString();
 }
 
 void _addEvent(
