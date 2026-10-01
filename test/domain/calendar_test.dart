@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hmmm/domain/calendar.dart';
 import 'package:hmmm/domain/hrt_window.dart';
 import 'package:hmmm/domain/models.dart';
+import 'package:hmmm/domain/periods.dart';
 
 void main() {
   final today = DateTime(2026, 6, 15);
@@ -10,9 +11,9 @@ void main() {
     final marker = buildDayCellMarkerData(
       date: DateTime(2026, 6, 11),
       today: today,
-      periods: [
+      periods: derivePeriods([
         Period(start: DateTime(2026, 6, 10), end: DateTime(2026, 6, 13)),
-      ],
+      ]),
       windowsByMedicationId: const {},
       laneByMedicationId: const {},
       entries: const [],
@@ -41,7 +42,7 @@ void main() {
     final marker = buildDayCellMarkerData(
       date: DateTime(2026, 6, 11),
       today: today,
-      periods: const [],
+      periods: const <DerivedPeriod>[],
       windowsByMedicationId: {
         9: [
           MedicationWindow(
@@ -73,7 +74,7 @@ void main() {
     final marker = buildDayCellMarkerData(
       date: DateTime(2026, 6, 11),
       today: today,
-      periods: const [],
+      periods: const <DerivedPeriod>[],
       windowsByMedicationId: const {},
       laneByMedicationId: const {},
       entries: [
@@ -107,12 +108,13 @@ void main() {
       Period(start: DateTime(2026, 5, 29), end: DateTime(2026, 6, 2)),
       Period(start: DateTime(2026, 6, 10)),
     ];
+    final derivedPeriods = derivePeriods(periods);
 
     expect(
       buildDayCellMarkerData(
         date: DateTime(2026, 5, 29),
         today: today,
-        periods: periods,
+        periods: derivedPeriods,
         windowsByMedicationId: const {},
         laneByMedicationId: const {},
         entries: const [],
@@ -123,7 +125,7 @@ void main() {
       buildDayCellMarkerData(
         date: DateTime(2026, 6, 2),
         today: today,
-        periods: periods,
+        periods: derivedPeriods,
         windowsByMedicationId: const {},
         laneByMedicationId: const {},
         entries: const [],
@@ -134,7 +136,7 @@ void main() {
       buildDayCellMarkerData(
         date: DateTime(2026, 6, 12),
         today: today,
-        periods: periods,
+        periods: derivedPeriods,
         windowsByMedicationId: const {},
         laneByMedicationId: const {},
         entries: const [],
@@ -145,12 +147,76 @@ void main() {
       buildDayCellMarkerData(
         date: DateTime(2026, 6, 9),
         today: today,
-        periods: periods,
+        periods: derivedPeriods,
         windowsByMedicationId: const {},
         laneByMedicationId: const {},
         entries: const [],
       ).periodDay,
       isNull,
+    );
+  });
+
+  test('derived open-period coverage distinguishes historical and ongoing', () {
+    final periods = derivePeriods([
+      Period(start: DateTime(2026, 5, 1)),
+      Period(start: DateTime(2026, 5, 20), end: DateTime(2026, 5, 24)),
+    ]);
+    final historical = periods.first;
+
+    expect(historical.isEndNotRecorded, isTrue);
+    expect(recordedPeriodLength(historical, today), 1);
+    final startMarker = buildDayCellMarkerData(
+      date: DateTime(2026, 5, 1),
+      today: today,
+      periods: periods,
+      windowsByMedicationId: const {},
+      laneByMedicationId: const {},
+      entries: const [],
+    );
+    expect(startMarker.inPeriod, isTrue);
+    expect(startMarker.startsPeriod, isTrue);
+    expect(startMarker.endsPeriod, isTrue);
+    expect(
+      buildDayCellMarkerData(
+        date: DateTime(2026, 5, 2),
+        today: today,
+        periods: periods,
+        windowsByMedicationId: const {},
+        laneByMedicationId: const {},
+        entries: const [],
+      ).inPeriod,
+      isFalse,
+    );
+
+    final ongoingPeriods = derivePeriods([
+      Period(start: DateTime(2026, 6, 10)),
+    ]);
+
+    expect(ongoingPeriods.single.isOngoing, isTrue);
+    expect(recordedPeriodLength(ongoingPeriods.single, today), 6);
+    for (final date in [DateTime(2026, 6, 10), today]) {
+      expect(
+        buildDayCellMarkerData(
+          date: date,
+          today: today,
+          periods: ongoingPeriods,
+          windowsByMedicationId: const {},
+          laneByMedicationId: const {},
+          entries: const [],
+        ).inPeriod,
+        isTrue,
+      );
+    }
+    expect(
+      buildDayCellMarkerData(
+        date: DateTime(2026, 6, 9),
+        today: today,
+        periods: ongoingPeriods,
+        windowsByMedicationId: const {},
+        laneByMedicationId: const {},
+        entries: const [],
+      ).inPeriod,
+      isFalse,
     );
   });
 

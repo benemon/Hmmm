@@ -10,9 +10,11 @@ import '../domain/calendar.dart';
 import '../domain/dates.dart';
 import '../domain/hrt_window.dart';
 import '../domain/models.dart';
+import '../domain/periods.dart';
 import 'feedback.dart';
 import 'format.dart';
 import 'marker_band.dart';
+import 'period_records.dart';
 import 'symptom_glyph.dart';
 import 'theme.dart';
 
@@ -91,6 +93,7 @@ class _DayDetailSheetState extends State<DayDetailSheet> {
     ];
     return _DayDetailData(
       periods: periods,
+      derivedPeriods: derivePeriods(periods),
       medications: medications,
       types: types,
       entries: entries,
@@ -223,6 +226,7 @@ class _GrabHandle extends StatelessWidget {
 class _DayDetailData {
   const _DayDetailData({
     required this.periods,
+    required this.derivedPeriods,
     required this.medications,
     required this.types,
     required this.entries,
@@ -233,6 +237,7 @@ class _DayDetailData {
   });
 
   final List<Period> periods;
+  final List<DerivedPeriod> derivedPeriods;
   final List<Medication> medications;
   final List<SymptomType> types;
   final List<SymptomEntry> entries;
@@ -266,19 +271,9 @@ class _DayPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cycleDay = cycleDayForDate(date, data.periods);
-    final openPeriod = data.periods
-        .where((period) => period.end == null)
+    final coveringPeriod = data.derivedPeriods
+        .where((period) => period.covers(date, today))
         .firstOrNull;
-    final coveringOpenPeriod =
-        openPeriod != null &&
-            !date.isBefore(openPeriod.start) &&
-            !date.isAfter(today)
-        ? openPeriod
-        : null;
-    final coveringClosedPeriod = data.periods.where((period) {
-      final end = period.end;
-      return end != null && !date.isBefore(period.start) && !date.isAfter(end);
-    }).firstOrNull;
     final entriesByTypeId = {
       for (final entry in data.entries)
         if (entry.date == date) entry.typeId: entry,
@@ -320,9 +315,7 @@ class _DayPage extends StatelessWidget {
                     date: date,
                     today: today,
                     periods: data.periods,
-                    openPeriod: openPeriod,
-                    coveringOpenPeriod: coveringOpenPeriod,
-                    coveringClosedPeriod: coveringClosedPeriod,
+                    coveringPeriod: coveringPeriod,
                     repository: periodRepository,
                   ),
                 ),
@@ -476,46 +469,54 @@ class _SheetBlock extends StatelessWidget {
   );
 }
 
-class _PeriodBlock extends StatelessWidget {
+class _PeriodBlock extends StatefulWidget {
   const _PeriodBlock({
     required this.date,
     required this.today,
     required this.periods,
-    required this.openPeriod,
-    required this.coveringOpenPeriod,
-    required this.coveringClosedPeriod,
+    required this.coveringPeriod,
     required this.repository,
   });
 
   final DateTime date;
   final DateTime today;
   final List<Period> periods;
-  final Period? openPeriod;
-  final Period? coveringOpenPeriod;
-  final Period? coveringClosedPeriod;
+  final DerivedPeriod? coveringPeriod;
   final PeriodRepository repository;
 
   @override
+  State<_PeriodBlock> createState() => _PeriodBlockState();
+}
+
+class _PeriodBlockState extends State<_PeriodBlock> {
+  bool _saving = false;
+
+  @override
   Widget build(BuildContext context) {
-    final covering = coveringClosedPeriod ?? coveringOpenPeriod;
+    final covering = widget.coveringPeriod;
+    final period = covering?.period;
     final recordedDays = covering == null
         ? null
-        : recordedPeriodLength(covering, today);
-    final status = coveringClosedPeriod != null
-        ? '${formatDate(coveringClosedPeriod!.start)} – '
-              '${formatDate(coveringClosedPeriod!.end!)}'
-        : coveringOpenPeriod != null
-        ? 'started ${formatDate(coveringOpenPeriod!.start)} · open'
-        : 'none recorded';
-    final facts = coveringClosedPeriod != null
-        ? '$recordedDays recorded '
-              '${recordedDays == 1 ? 'day' : 'days'}, '
-              'end recorded'
-        : coveringOpenPeriod != null
+        : recordedPeriodLength(covering, widget.today);
+    final status = covering == null
+        ? 'none recorded'
+        : covering.isOngoing
+        ? 'started ${formatDate(period!.start)} · open'
+        : '${formatDate(period!.start)} – '
+              '${formatDate(covering.displayEnd(widget.today))}';
+    final facts = covering == null
+        ? _nearestStartText(widget.date, widget.periods)
+        : covering.isEndNotRecorded
+        ? '1 day · end not recorded'
+        : covering.isOngoing
         ? '$recordedDays recorded '
               '${recordedDays == 1 ? 'day' : 'days'}, '
               'no end recorded'
-        : _nearestStartText(date, periods);
+        : '$recordedDays recorded '
+              '${recordedDays == 1 ? 'day' : 'days'}, '
+              'end recorded';
+    final isStart = period?.start == widget.date;
+    final canStart = covering == null && !widget.date.isAfter(widget.today);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -530,31 +531,34 @@ class _PeriodBlock extends StatelessWidget {
             ),
           ),
         ],
-        if (covering != null ||
-            (openPeriod == null && !date.isAfter(today))) ...[
+        if (covering != null || canStart) ...[
           const SizedBox(height: Dim.s3),
           Wrap(
             spacing: Dim.s2,
             runSpacing: Dim.s2,
             children: [
-              if (openPeriod == null &&
-                  coveringClosedPeriod == null &&
-                  !date.isAfter(today))
+              if (canStart || isStart)
                 FilledButton(
-                  key: ValueKey('period-start-${dateToIso(date)}'),
-                  onPressed: () => _startPeriod(context),
+                  key: ValueKey('period-start-${dateToIso(widget.date)}'),
+                  onPressed: canStart && !_saving
+                      ? () => _startPeriod(context)
+                      : null,
                   child: const Text('Period started'),
-                )
-              else if (coveringOpenPeriod != null)
+                ),
+              if (covering?.isOngoing ?? false)
                 FilledButton(
-                  key: ValueKey('period-end-${dateToIso(date)}'),
-                  onPressed: () => _endPeriod(context, coveringOpenPeriod!),
+                  key: ValueKey('period-end-${dateToIso(widget.date)}'),
+                  onPressed: _saving
+                      ? null
+                      : () => _endPeriod(context, period!),
                   child: const Text('Period ended'),
                 ),
               if (covering != null)
                 TextButton(
-                  key: ValueKey('period-delete-${dateToIso(date)}'),
-                  onPressed: () => _deletePeriod(context, covering),
+                  key: ValueKey('period-delete-${dateToIso(widget.date)}'),
+                  onPressed: _saving
+                      ? null
+                      : () => _deletePeriod(context, covering),
                   child: const Text('Delete record'),
                 ),
             ],
@@ -564,13 +568,20 @@ class _PeriodBlock extends StatelessWidget {
     );
   }
 
-  Future<void> _deletePeriod(BuildContext context, Period period) async {
+  Future<void> _deletePeriod(
+    BuildContext context,
+    DerivedPeriod derived,
+  ) async {
+    final period = derived.period;
+    final rangeEnd = derived.isOngoing
+        ? null
+        : derived.displayEnd(widget.today);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete period record?'),
         content: Text(
-          '${formatPeriodRange(period.start, period.end)}\n\n'
+          '${formatPeriodRange(period.start, rangeEnd)}\n\n'
           'Derived medication windows from this start are removed too.',
           style: HmmmType.of(context).figure,
         ),
@@ -587,25 +598,38 @@ class _PeriodBlock extends StatelessWidget {
         ],
       ),
     );
-    if (confirmed == true) await repository.delete(period.id!);
+    if (confirmed == true) await widget.repository.delete(period.id!);
   }
 
   Future<void> _startPeriod(BuildContext context) async {
+    if (_saving) return;
+    setState(() => _saving = true);
     try {
-      await repository.insert(Period(start: date), today: today);
+      await insertPeriodWithEndPrompts(
+        context,
+        repository: widget.repository,
+        today: widget.today,
+        start: widget.date,
+      );
     } on ArgumentError catch (error) {
       if (context.mounted) showValidationError(context, error);
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _endPeriod(BuildContext context, Period period) async {
+    if (_saving) return;
+    setState(() => _saving = true);
     try {
-      await repository.update(
-        Period(id: period.id, start: period.start, end: date),
-        today: today,
+      await widget.repository.update(
+        Period(id: period.id, start: period.start, end: widget.date),
+        today: widget.today,
       );
     } on ArgumentError catch (error) {
       if (context.mounted) showValidationError(context, error);
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 }
@@ -676,7 +700,8 @@ class _MedicationCourseRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final marker = Markers.of(context).lane(course.laneIndex);
+    final marker = Markers.of(context)
+        .course(course.medication.id!, course.laneIndex);
     final adjustment = course.adjustment;
     return Semantics(
       customSemanticsActions: course.window.sourcePeriodStart == null
@@ -697,8 +722,6 @@ class _MedicationCourseRow extends StatelessWidget {
                 texture: marker.texture,
               ),
             ),
-            const SizedBox(width: Dim.s2),
-            Text(marker.label, style: Theme.of(context).textTheme.labelSmall),
             const SizedBox(width: Dim.s2),
             Expanded(
               child: Column(

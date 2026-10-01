@@ -23,8 +23,6 @@ jobs:
         run: flutter analyze
       - name: Test
         run: flutter test
-      - name: Screenshot lane registers
-        run: flutter test test/screenshots
       - name: Grep gate
         run: sh tool/grep_checks.sh
 

@@ -10,11 +10,13 @@ import '../data/medication_repository.dart';
 import '../data/period_repository.dart';
 import '../data/settings_repository.dart';
 import '../data/symptom_repository.dart';
+import '../domain/calendar.dart';
 import '../domain/hrt_window.dart';
 import '../domain/models.dart';
 import '../export/ics.dart';
 import '../export/json.dart';
 import '../export/report.dart';
+import 'colour_picker.dart';
 import 'feedback.dart';
 import 'format.dart';
 import 'medications.dart';
@@ -42,12 +44,15 @@ class SettingsScreen extends StatelessWidget {
   final AppAuthenticator authenticator;
   final DateTime today;
 
-  Future<_SettingsData> _loadData() async => _SettingsData(
-    periods: await periodRepository.listPeriods(),
-    medications: await medicationRepository.listMedications(),
-    symptomTypes: await symptomRepository.listTypes(),
-    symptomEntries: await symptomRepository.listEntries(),
-  );
+  Future<_SettingsData> _loadData() async {
+    final periods = await periodRepository.listPeriods();
+    return _SettingsData(
+      periods: periods,
+      medications: await medicationRepository.listMedications(),
+      symptomTypes: await symptomRepository.listTypes(),
+      symptomEntries: await symptomRepository.listEntries(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -83,6 +88,24 @@ class SettingsScreen extends StatelessWidget {
                               medicationRepository: medicationRepository,
                               periodRepository: periodRepository,
                               symptomRepository: symptomRepository,
+                              settingsRepository: settingsRepository,
+                              today: today,
+                            ),
+                          ),
+                        ),
+                      ),
+                      _SettingsRow(
+                        key: const ValueKey('settings-colours'),
+                        title: 'Colours',
+                        detail:
+                            'Period · ${_count(data.medications.length, 'medication')}',
+                        navigating: true,
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (context) => _ColoursScreen(
+                              medications: data.medications,
+                              periods: data.periods,
+                              settingsRepository: settingsRepository,
                               today: today,
                             ),
                           ),
@@ -320,20 +343,25 @@ class _RecordsScreen extends StatelessWidget {
     required this.periodRepository,
     required this.medicationRepository,
     required this.symptomRepository,
+    required this.settingsRepository,
     required this.today,
   });
 
   final PeriodRepository periodRepository;
   final MedicationRepository medicationRepository;
   final SymptomRepository symptomRepository;
+  final SettingsRepository settingsRepository;
   final DateTime today;
 
-  Future<_SettingsData> _loadData() async => _SettingsData(
-    periods: await periodRepository.listPeriods(),
-    medications: await medicationRepository.listMedications(),
-    symptomTypes: await symptomRepository.listTypes(),
-    symptomEntries: const [],
-  );
+  Future<_SettingsData> _loadData() async {
+    final periods = await periodRepository.listPeriods();
+    return _SettingsData(
+      periods: periods,
+      medications: await medicationRepository.listMedications(),
+      symptomTypes: await symptomRepository.listTypes(),
+      symptomEntries: const [],
+    );
+  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -367,6 +395,7 @@ class _RecordsScreen extends StatelessWidget {
                           builder: (context) => MedicationsScreen(
                             medicationRepository: medicationRepository,
                             periodRepository: periodRepository,
+                            settingsRepository: settingsRepository,
                             today: today,
                           ),
                         ),
@@ -404,6 +433,94 @@ class _RecordsScreen extends StatelessWidget {
                 ),
         );
       },
+    ),
+  );
+}
+
+class _ColoursScreen extends StatelessWidget {
+  const _ColoursScreen({
+    required this.medications,
+    required this.periods,
+    required this.settingsRepository,
+    required this.today,
+  });
+
+  final List<Medication> medications;
+  final List<Period> periods;
+  final SettingsRepository settingsRepository;
+  final DateTime today;
+
+  @override
+  Widget build(BuildContext context) {
+    final laneById = laneAssignments([
+      for (final medication in medications)
+        if (medicationHasDerivableWindows(medication, periods, today: today))
+          medication,
+    ]);
+    return ListenableBuilder(
+      listenable: settingsRepository,
+      builder: (context, child) => Scaffold(
+        key: const ValueKey('colours-screen'),
+        appBar: AppBar(
+          title: Semantics(namesRoute: true, child: const Text('Colours')),
+        ),
+        body: ListView.separated(
+          itemCount: medications.length + 1,
+          separatorBuilder: (context, index) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            if (index == 0) {
+              return _ColourRow(
+                title: 'Period',
+                selectedId: settingsRepository.periodColourId,
+                keyPrefix: 'period-colour',
+                onSelected: settingsRepository.setPeriodColour,
+              );
+            }
+            final medication = medications[index - 1];
+            return _ColourRow(
+              title: medication.name,
+              selectedId: settingsRepository.medicationColourId(
+                medication.id!,
+                medicationLaneIndex(laneById, medication.id!, index - 1),
+              ),
+              keyPrefix: 'course-colour-${medication.id}',
+              onSelected: (value) =>
+                  settingsRepository.setMedicationColour(medication.id!, value),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ColourRow extends StatelessWidget {
+  const _ColourRow({
+    required this.title,
+    required this.selectedId,
+    required this.keyPrefix,
+    required this.onSelected,
+  });
+
+  final String title;
+  final String selectedId;
+  final String keyPrefix;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(Dim.s4, Dim.s3, Dim.s4, Dim.s3),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: HmmmType.of(context).bodyStrong),
+        const SizedBox(height: Dim.s1),
+        BandColourPicker(
+          selectedId: selectedId,
+          keyPrefix: keyPrefix,
+          onSelected: onSelected,
+        ),
+      ],
     ),
   );
 }

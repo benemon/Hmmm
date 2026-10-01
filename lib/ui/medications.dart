@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../data/medication_repository.dart';
 import '../data/period_repository.dart';
+import '../data/settings_repository.dart';
 import '../domain/calendar.dart';
 import '../domain/hrt_window.dart';
 import '../domain/models.dart';
+import 'colour_picker.dart';
 import 'empty_state.dart';
 import 'feedback.dart';
 import 'format.dart';
@@ -16,11 +18,13 @@ class MedicationsScreen extends StatefulWidget {
     super.key,
     required this.medicationRepository,
     required this.periodRepository,
+    required this.settingsRepository,
     required this.today,
   });
 
   final MedicationRepository medicationRepository;
   final PeriodRepository periodRepository;
+  final SettingsRepository settingsRepository;
   final DateTime today;
 
   @override
@@ -36,6 +40,7 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
     _repositories = Listenable.merge([
       widget.medicationRepository,
       widget.periodRepository,
+      widget.settingsRepository,
     ]);
   }
 
@@ -91,15 +96,19 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
                         medication: medication,
                         laneIndex: laneById[medication.id!],
                         repository: widget.medicationRepository,
+                        settingsRepository: widget.settingsRepository,
                         today: widget.today,
-                        onEdit: () => _openForm(medication),
+                        onEdit: () =>
+                            _openForm(medication, index, data, laneById),
                       );
                     },
                   ),
             floatingActionButton: FloatingActionButton.extended(
               key: const ValueKey('add-medication'),
               tooltip: 'Add medication',
-              onPressed: () => _openForm(null),
+              onPressed: data == null
+                  ? null
+                  : () => _openForm(null, 0, data, laneById),
               icon: const Icon(Icons.add),
               label: const Text('Add medication'),
               shape: RoundedRectangleBorder(
@@ -112,15 +121,45 @@ class _MedicationsScreenState extends State<MedicationsScreen> {
     );
   }
 
-  Future<void> _openForm(Medication? medication) => Navigator.of(context).push(
+  Future<void> _openForm(
+    Medication? medication,
+    int position,
+    _MedicationData data,
+    Map<int, int> laneById,
+  ) => Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (context) => _MedicationFormScreen(
         repository: widget.medicationRepository,
+        settingsRepository: widget.settingsRepository,
         medication: medication,
         today: widget.today,
+        colourId: medication == null
+            ? _nextMedicationColour(data.medications, laneById)
+            : widget.settingsRepository.medicationColourId(
+                medication.id!,
+                medicationLaneIndex(laneById, medication.id!, position),
+              ),
       ),
     ),
   );
+
+  String _nextMedicationColour(
+    List<Medication> medications,
+    Map<int, int> laneById,
+  ) {
+    final used = {
+      for (final (index, medication) in medications.indexed)
+        widget.settingsRepository.medicationColourId(
+          medication.id!,
+          medicationLaneIndex(laneById, medication.id!, index),
+        ),
+    };
+    used.add(widget.settingsRepository.periodColourId);
+    for (final swatch in bandColourSwatches) {
+      if (!used.contains(swatch.id)) return swatch.id;
+    }
+    return 'slate';
+  }
 }
 
 class _MedicationData {
@@ -137,6 +176,7 @@ class _MedicationTile extends StatelessWidget {
     required this.medication,
     required this.laneIndex,
     required this.repository,
+    required this.settingsRepository,
     required this.today,
     required this.onEdit,
   });
@@ -144,35 +184,34 @@ class _MedicationTile extends StatelessWidget {
   final Medication medication;
   final int? laneIndex;
   final MedicationRepository repository;
+  final SettingsRepository settingsRepository;
   final DateTime today;
   final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
     final lane = laneIndex;
-    final laneMarker = lane == null ? null : Markers.of(context).lane(lane);
+    final laneMarker = lane == null
+        ? null
+        : Markers.of(context).course(medication.id!, lane);
     return ListTile(
       key: ValueKey('medication-${medication.id}'),
       leading: lane == null
           ? null
-          : Semantics(
-              key: ValueKey('medication-lane-${medication.id}'),
-              container: true,
-              label: 'calendar lane ${lane + 1}',
-              child: ExcludeSemantics(
-                child: SizedBox(
-                  width: 20,
-                  child: MarkerBand(
-                    color: laneMarker!.color,
-                    height: Dim.laneBandHeight,
-                    texture: laneMarker.texture,
-                  ),
+          : ExcludeSemantics(
+              child: SizedBox(
+                key: ValueKey('medication-lane-${medication.id}'),
+                width: 20,
+                child: MarkerBand(
+                  color: laneMarker!.color,
+                  height: Dim.laneBandHeight,
+                  texture: laneMarker.texture,
                 ),
               ),
             ),
       title: Text(medication.name, style: HmmmType.of(context).bodyStrong),
       subtitle: Text(
-        _medicationFacts(medication, laneMarker?.label),
+        _medicationFacts(medication),
         style: HmmmType.of(context).figureSmall
             .copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
@@ -265,7 +304,10 @@ class _MedicationTile extends StatelessWidget {
             ],
           ),
         );
-        if (confirmed == true) await repository.delete(medication.id!);
+        if (confirmed == true) {
+          await repository.delete(medication.id!);
+          await settingsRepository.clearMedicationColour(medication.id!);
+        }
     }
   }
 
@@ -281,13 +323,17 @@ class _MedicationTile extends StatelessWidget {
 class _MedicationFormScreen extends StatefulWidget {
   const _MedicationFormScreen({
     required this.repository,
+    required this.settingsRepository,
     required this.medication,
     required this.today,
+    required this.colourId,
   });
 
   final MedicationRepository repository;
+  final SettingsRepository settingsRepository;
   final Medication? medication;
   final DateTime today;
+  final String colourId;
 
   @override
   State<_MedicationFormScreen> createState() => _MedicationFormScreenState();
@@ -343,6 +389,7 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
   late DateTime _intervalAnchor = _fixedInterval?.anchor ?? widget.today;
   late DateTime _continuousStart = _continuous?.start ?? widget.today;
   late DateTime? _continuousEnd = _continuous?.end;
+  late String _colourId = widget.colourId;
 
   CyclicalMedicationSchedule? get _cyclical =>
       widget.medication?.schedule is CyclicalMedicationSchedule
@@ -461,6 +508,15 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
                 );
               },
             ),
+          const SizedBox(height: Dim.s5),
+          _LabeledField(
+            label: 'COLOUR',
+            child: BandColourPicker(
+              selectedId: _colourId,
+              keyPrefix: 'medication-colour',
+              onSelected: (value) => setState(() => _colourId = value),
+            ),
+          ),
           const SizedBox(height: Dim.s5),
           _LabeledField(
             label: 'SCHEDULE',
@@ -689,9 +745,19 @@ class _MedicationFormScreenState extends State<_MedicationFormScreen> {
         notes: original?.notes,
       );
       if (original == null) {
-        await widget.repository.insert(medication);
+        final inserted = await widget.repository.insert(medication);
+        await widget.settingsRepository.setMedicationColour(
+          inserted.id!,
+          _colourId,
+        );
       } else {
         await widget.repository.update(medication);
+        if (_colourId != widget.colourId) {
+          await widget.settingsRepository.setMedicationColour(
+            original.id!,
+            _colourId,
+          );
+        }
       }
       if (mounted) Navigator.pop(context);
     } on ArgumentError catch (error) {
@@ -901,10 +967,9 @@ Medication _resumedMedication(Medication medication) {
   );
 }
 
-String _medicationFacts(Medication medication, String? laneLabel) {
+String _medicationFacts(Medication medication) {
   final schedule = medication.schedule;
   final facts = [medication.dose];
-  if (laneLabel != null) facts.add('calendar lane $laneLabel');
   if (schedule is CyclicalMedicationSchedule) {
     facts.add(
       'cycle day ${schedule.startCycleDay}, ${schedule.durationDays} days',

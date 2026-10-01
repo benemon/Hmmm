@@ -21,6 +21,13 @@ jobs:
           flutter-version: 3.47.2
           channel: stable
           cache: true
+      - name: Signing material
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_PROPERTIES: ${{ secrets.ANDROID_KEY_PROPERTIES }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release-keystore.jks"
+          printf '%s\nstoreFile=%s\n' "$ANDROID_KEY_PROPERTIES" "$RUNNER_TEMP/release-keystore.jks" > android/key.properties
       - run: flutter pub get
       - run: flutter build apk --release --split-per-abi --target-platform android-arm64
       - run: mkdir dist && cp build/app/outputs/apk/release/hmmm-*-arm64-v8a-release.apk dist/
@@ -33,6 +40,15 @@ jobs:
           ! grep -q 'android.permission.INTERNET' "$manifest"
           grep -q 'android:dataExtractionRules=' "$manifest"
           grep -q 'android:fullBackupContent=' "$manifest"
+      - name: APKs are signed with the release key
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          for apk in dist/*.apk; do
+            "$apksigner" verify --print-certs "$apk" | grep -q 'SHA-256 digest: e396e9797fa5792eae9e594eb887961417e1bf9c9b58dd1d3f25af29cebbc6c3'
+          done
+      - name: Clean up signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release-keystore.jks" android/key.properties
       - name: Publish release with the APKs attached
         env:
           GH_TOKEN: ${{ github.token }}

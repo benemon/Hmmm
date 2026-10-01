@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../domain/dates.dart';
 import '../domain/hrt_window.dart';
 import '../domain/models.dart';
+import '../domain/periods.dart';
 
 class IcsMedicationWindows {
   const IcsMedicationWindows({required this.name, required this.windows});
@@ -33,8 +34,9 @@ String buildIcs({
     'CALSCALE:GREGORIAN',
   ];
 
-  for (final period in periods) {
-    final clipped = _clip(period.start, period.end ?? exportedAt, range);
+  for (final derived in derivePeriods(periods)) {
+    final period = derived.period;
+    final clipped = _clip(period.start, derived.displayEnd(exportedAt), range);
     if (clipped == null) continue;
     _addEvent(
       lines,

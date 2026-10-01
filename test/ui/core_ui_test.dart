@@ -13,6 +13,7 @@ import 'package:hmmm/main.dart';
 import 'package:hmmm/app_authenticator.dart';
 import 'package:hmmm/ui/calendar.dart';
 import 'package:hmmm/ui/day_detail.dart';
+import 'package:hmmm/ui/marker_band.dart';
 import 'package:hmmm/ui/theme.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -84,6 +85,182 @@ void main() {
     expect(find.text('9 Jun 2026 – 12 Jun 2026'), findsOneWidget);
     expect(find.text('Wednesday · cycle day 2'), findsOneWidget);
     expect(find.text('4 recorded days, end recorded'), findsOneWidget);
+  });
+
+  testWidgets('grid shows past cycle day but no future cycle day', (
+    tester,
+  ) async {
+    await periods.insert(
+      Period(start: DateTime(2026, 6, 1), end: DateTime(2026, 6, 3)),
+      today: today,
+    );
+    await pumpApp(tester);
+
+    expect(find.byKey(const ValueKey('cycle-day-2026-06-02')), findsOneWidget);
+    expect(find.byKey(const ValueKey('cycle-day-2026-06-16')), findsNothing);
+  });
+
+  testWidgets('period capsule joins adjacent days and today has a ring', (
+    tester,
+  ) async {
+    await periods.insert(
+      Period(start: DateTime(2026, 6, 1), end: DateTime(2026, 6, 3)),
+      today: today,
+    );
+    await pumpApp(tester);
+
+    final startCapsule = tester.widget<PeriodCapsule>(
+      find.descendant(
+        of: find.byKey(const ValueKey('period-capsule-2026-06-01')),
+        matching: find.byType(PeriodCapsule),
+      ),
+    );
+    final middleCapsule = tester.widget<PeriodCapsule>(
+      find.descendant(
+        of: find.byKey(const ValueKey('period-capsule-2026-06-02')),
+        matching: find.byType(PeriodCapsule),
+      ),
+    );
+    final endCapsule = tester.widget<PeriodCapsule>(
+      find.descendant(
+        of: find.byKey(const ValueKey('period-capsule-2026-06-03')),
+        matching: find.byType(PeriodCapsule),
+      ),
+    );
+    expect(startCapsule.capStart, isTrue);
+    expect(startCapsule.capEnd, isFalse);
+    expect(middleCapsule.capStart, isFalse);
+    expect(middleCapsule.capEnd, isFalse);
+    expect(endCapsule.capStart, isFalse);
+    expect(endCapsule.capEnd, isTrue);
+    expect(find.byKey(const ValueKey('today-ring-2026-06-15')), findsOneWidget);
+  });
+
+  testWidgets('settings colours recolour calendar course and period bands', (
+    tester,
+  ) async {
+    await periods.insert(
+      Period(start: DateTime(2026, 6, 9), end: DateTime(2026, 6, 12)),
+      today: today,
+    );
+    final medication = await medications.insert(
+      Medication(
+        name: 'Oestrogen',
+        dose: '2 pumps',
+        schedule: ContinuousMedicationSchedule(start: DateTime(2026, 6, 1)),
+        active: true,
+      ),
+    );
+    await pumpApp(tester);
+
+    expect(
+      tester.widget<CourseBand>(find.byType(CourseBand).first).color,
+      bandColourSwatchById('blue')!.light,
+    );
+    expect(
+      tester.widget<PeriodCapsule>(find.byType(PeriodCapsule).first).color,
+      bandColourSwatchById('red')!.light,
+    );
+
+    await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('settings-colours')));
+    await _pumpFrames(tester);
+    final semanticsHandle = tester.ensureSemantics();
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(ValueKey('course-colour-${medication.id}-blue')),
+          )
+          .label,
+      'Blue, selected',
+    );
+    await tester.tap(
+      find.byKey(ValueKey('course-colour-${medication.id}-teal')),
+    );
+    await _pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('period-colour-green')));
+    await _pumpFrames(tester);
+    semanticsHandle.dispose();
+    await tester.tap(find.byTooltip('Back'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('CALENDAR'));
+    await _pumpFrames(tester);
+
+    expect(
+      tester.widget<CourseBand>(find.byType(CourseBand).first).color,
+      bandColourSwatchById('teal')!.light,
+    );
+    expect(
+      tester.widget<PeriodCapsule>(find.byType(PeriodCapsule).first).color,
+      bandColourSwatchById('green')!.light,
+    );
+  });
+
+  testWidgets('course name appears only on multi-day week segments', (
+    tester,
+  ) async {
+    final medication = await medications.insert(
+      Medication(
+        name: 'Progesterone',
+        dose: '200 mg',
+        schedule: FixedIntervalMedicationSchedule(
+          anchor: DateTime(2026, 6, 7),
+          intervalDays: 28,
+          durationDays: 4,
+        ),
+        active: true,
+      ),
+    );
+    await pumpApp(tester);
+
+    final oneDay = find.byKey(
+      ValueKey('course-segment-2026-06-07-${medication.id}'),
+    );
+    final multiDay = find.byKey(
+      ValueKey('course-segment-2026-06-08-${medication.id}'),
+    );
+    expect(oneDay, findsOneWidget);
+    expect(
+      find.descendant(of: oneDay, matching: find.text('Progesterone')),
+      findsNothing,
+    );
+    expect(multiDay, findsOneWidget);
+    expect(
+      find.descendant(of: multiDay, matching: find.text('Progesterone')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(of: multiDay, matching: find.text('Progesterone')),
+          )
+          .style
+          ?.fontFamily,
+      'Public Sans',
+    );
+  });
+
+  testWidgets('lane numbers are absent from calendar and day detail', (
+    tester,
+  ) async {
+    await periods.insert(
+      Period(start: DateTime(2026, 6, 1), end: DateTime(2026, 6, 5)),
+      today: today,
+    );
+    await medications.insert(
+      Medication(
+        name: 'Progesterone',
+        dose: '200 mg',
+        schedule: CyclicalMedicationSchedule(startCycleDay: 1, durationDays: 4),
+        active: true,
+      ),
+    );
+    await pumpApp(tester);
+    await tester.tap(find.byKey(const ValueKey('day-2026-06-02')));
+    await _pumpFrames(tester);
+
+    expect(find.textContaining(RegExp(r'L[123]')), findsNothing);
   });
 
   testWidgets('closed-period day offers delete without a start action', (
@@ -184,10 +361,11 @@ void main() {
       ),
     );
     await pumpApp(tester);
-    final laterBand = find.byKey(
-      ValueKey('medication-band-2026-06-04-${medication.id}'),
+    final segment = find.byKey(
+      ValueKey('course-segment-2026-06-01-${medication.id}'),
     );
-    expect(laterBand, findsOneWidget);
+    expect(segment, findsOneWidget);
+    final fullExtent = tester.getSize(segment).width;
 
     await tester.tap(find.byKey(const ValueKey('day-2026-06-02')));
     await _pumpFrames(tester);
@@ -206,11 +384,8 @@ void main() {
     expect(find.text('ended early 2 Jun 2026'), findsOneWidget);
     await tester.tapAt(const Offset(10, 10));
     await _pumpFrames(tester);
-    expect(
-      find.byKey(ValueKey('medication-band-2026-06-02-${medication.id}')),
-      findsOneWidget,
-    );
-    expect(laterBand, findsNothing);
+    expect(segment, findsOneWidget);
+    expect(tester.getSize(segment).width, lessThan(fullExtent));
 
     await tester.tap(find.byKey(const ValueKey('day-2026-06-02')));
     await _pumpFrames(tester);
@@ -221,7 +396,8 @@ void main() {
     await tester.tapAt(const Offset(10, 10));
     await _pumpFrames(tester);
 
-    expect(laterBand, findsOneWidget);
+    expect(segment, findsOneWidget);
+    expect(tester.getSize(segment).width, fullExtent);
   });
 
   testWidgets('skipped course remains discoverable and restorable', (
@@ -247,10 +423,10 @@ void main() {
       ),
     );
     await pumpApp(tester);
-    final band = find.byKey(
-      ValueKey('medication-band-2026-06-03-${medication.id}'),
+    final segment = find.byKey(
+      ValueKey('course-segment-2026-06-01-${medication.id}'),
     );
-    expect(band, findsNothing);
+    expect(segment, findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('day-2026-06-03')));
     await _pumpFrames(tester);
@@ -264,7 +440,13 @@ void main() {
     await tester.tapAt(const Offset(10, 10));
     await _pumpFrames(tester);
 
-    expect(band, findsOneWidget);
+    expect(segment, findsOneWidget);
+    expect(
+      tester.getSize(segment).width,
+      greaterThan(
+        tester.getSize(find.byKey(const ValueKey('day-2026-06-01'))).width * 3,
+      ),
+    );
   });
 
   testWidgets('long-press drag records the dropped course start', (
@@ -308,14 +490,18 @@ void main() {
         startDate: DateTime(2026, 6, 3),
       ),
     ]);
-    expect(
-      find.byKey(ValueKey('medication-band-2026-06-01-${medication.id}')),
-      findsNothing,
+    final originalSegment = find.byKey(
+      ValueKey('course-segment-2026-06-01-${medication.id}'),
     );
-    expect(
-      find.byKey(ValueKey('medication-band-2026-06-06-${medication.id}')),
-      findsOneWidget,
+    final shiftedSegment = find.byKey(
+      ValueKey('course-segment-2026-06-03-${medication.id}'),
     );
+    expect(originalSegment, findsNothing);
+    expect(shiftedSegment, findsOneWidget);
+    final dayWidth = tester
+        .getSize(find.byKey(const ValueKey('day-2026-06-03')))
+        .width;
+    expect(tester.getSize(shiftedSegment).width, greaterThan(dayWidth * 3));
   });
 
   testWidgets('drag-out and Escape cancel a course nudge', (tester) async {
@@ -680,6 +866,105 @@ void main() {
     expect(saved.end, DateTime(2026, 6, 10));
   });
 
+  testWidgets(
+    'historical period start can be recorded with no end as one day',
+    (tester) async {
+      await periods.insert(
+        Period(start: DateTime(2026, 6, 10), end: DateTime(2026, 6, 12)),
+        today: today,
+      );
+      await pumpApp(tester);
+      await tester.tap(find.byKey(const ValueKey('day-2026-06-05')));
+      await _pumpFrames(tester);
+
+      await tester.tap(find.byKey(const ValueKey('period-start-2026-06-05')));
+      await _pumpFrames(tester);
+      expect(find.text('End date?'), findsOneWidget);
+      expect(find.text('5 Jun 2026'), findsWidgets);
+      await tester.tap(find.text('Record as 1 day'));
+      await _pumpFrames(tester);
+
+      final saved = await periods.listPeriods();
+      expect(saved, hasLength(2));
+      expect(saved.first.start, DateTime(2026, 6, 5));
+      expect(saved.first.end, isNull);
+      expect(find.text('1 day · end not recorded'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('next-day')));
+      await _pumpFrames(tester);
+      expect(
+        find.byKey(const ValueKey('day-detail-2026-06-06')),
+        findsOneWidget,
+      );
+      expect(find.text('none recorded'), findsOneWidget);
+    },
+  );
+
+  testWidgets('historical period start prompt stores the chosen end', (
+    tester,
+  ) async {
+    await periods.insert(
+      Period(start: DateTime(2026, 6, 10), end: DateTime(2026, 6, 12)),
+      today: today,
+    );
+    await pumpApp(tester);
+    await tester.tap(find.byKey(const ValueKey('day-2026-06-05')));
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byKey(const ValueKey('period-start-2026-06-05')));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Choose end'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+    await tester.tap(find.text('7').last);
+    await tester.tap(find.text('OK'));
+    await _pumpFrames(tester);
+
+    final saved = await periods.listPeriods();
+    expect(saved, hasLength(2));
+    expect(saved.first.start, DateTime(2026, 6, 5));
+    expect(saved.first.end, DateTime(2026, 6, 7));
+  });
+
+  testWidgets('records add resolves an earlier ongoing period first', (
+    tester,
+  ) async {
+    await periods.insert(Period(start: DateTime(2026, 6, 2)), today: today);
+    await pumpApp(tester);
+    await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Records'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Period records'));
+    await _pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('add-period')));
+    await _pumpFrames(tester);
+
+    await tester.tap(find.byKey(const ValueKey('apply-period')));
+    await _pumpFrames(tester);
+
+    expect(
+      find.text('End date for the period starting 2 Jun 2026?'),
+      findsOneWidget,
+    );
+    expect(find.text('Record as 1 day'), findsOneWidget);
+    expect(find.text('Choose end'), findsOneWidget);
+  });
+
+  testWidgets('saved period start stays visible and disabled', (tester) async {
+    await pumpApp(tester);
+    await tester.tap(find.byKey(const ValueKey('day-2026-06-10')));
+    await _pumpFrames(tester);
+    final start = find.byKey(const ValueKey('period-start-2026-06-10'));
+
+    await tester.tap(start);
+    await _pumpFrames(tester);
+
+    expect(start, findsOneWidget);
+    expect(tester.widget<FilledButton>(start).onPressed, isNull);
+    expect(find.byKey(const ValueKey('period-end-2026-06-10')), findsOneWidget);
+    expect(await periods.listPeriods(), hasLength(1));
+  });
+
   testWidgets('erroneous period is deletable from the day sheet', (
     tester,
   ) async {
@@ -799,6 +1084,121 @@ void main() {
     );
   });
 
+  testWidgets('new medication stores the first unused effective colour', (
+    tester,
+  ) async {
+    for (final name in ['First', 'Second']) {
+      await medications.insert(
+        Medication(
+          name: name,
+          dose: '1 mg',
+          schedule: ContinuousMedicationSchedule(start: DateTime(2026, 1, 1)),
+          active: true,
+        ),
+      );
+    }
+    await pumpApp(tester);
+    await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Records'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Medications'));
+    await _pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('add-medication')));
+    await _pumpFrames(tester);
+
+    final semanticsHandle = tester.ensureSemantics();
+    expect(
+      tester
+          .getSemantics(find.byKey(const ValueKey('medication-colour-purple')))
+          .label,
+      'Purple, selected',
+    );
+    semanticsHandle.dispose();
+    await tester.enterText(
+      find.byKey(const ValueKey('medication-name')),
+      'Third',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('medication-dose-amount')),
+      '1',
+    );
+    await tester.tap(find.byKey(const ValueKey('save-medication')));
+    await _pumpFrames(tester);
+
+    final inserted = (await medications.listMedications()).last;
+    expect(settings.medicationColourId(inserted.id!, 2), 'purple');
+    expect(
+      await database.query(
+        'settings',
+        where: 'key = ?',
+        whereArgs: ['colour_medication_${inserted.id}'],
+      ),
+      [
+        {'key': 'colour_medication_${inserted.id}', 'value': 'purple'},
+      ],
+    );
+  });
+
+  testWidgets('new medication skips the chosen period colour', (tester) async {
+    await settings.setPeriodColour('blue');
+    await pumpApp(tester);
+    await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Records'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Medications'));
+    await _pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('add-medication')));
+    await _pumpFrames(tester);
+    await tester.enterText(
+      find.byKey(const ValueKey('medication-name')),
+      'First',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('medication-dose-amount')),
+      '1',
+    );
+    await tester.tap(find.byKey(const ValueKey('save-medication')));
+    await _pumpFrames(tester);
+
+    final inserted = (await medications.listMedications()).single;
+    expect(settings.medicationColourId(inserted.id!, 0), 'red');
+  });
+
+  testWidgets('saving an unchanged medication keeps its lane default', (
+    tester,
+  ) async {
+    final medication = await medications.insert(
+      Medication(
+        name: 'First',
+        dose: '1 mg',
+        schedule: ContinuousMedicationSchedule(start: DateTime(2026, 1, 1)),
+        active: true,
+      ),
+    );
+    await pumpApp(tester);
+    await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Records'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Medications'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('First'));
+    await _pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('save-medication')));
+    await _pumpFrames(tester);
+
+    expect(
+      await database.query(
+        'settings',
+        where: 'key = ?',
+        whereArgs: ['colour_medication_${medication.id}'],
+      ),
+      isEmpty,
+    );
+  });
+
   testWidgets('fixed-interval summary and form reflow at 200 percent', (
     tester,
   ) async {
@@ -825,21 +1225,14 @@ void main() {
     await _pumpFrames(tester);
 
     expect(
-      find.text(
-        '200 mg · calendar lane L1 · 12 days every 28 days from 4 Mar 2026',
-      ),
+      find.text('200 mg · 12 days every 28 days from 4 Mar 2026'),
       findsOneWidget,
     );
-    final laneSemantics = tester.ensureSemantics();
     expect(
-      tester
-          .getSemantics(
-            find.byKey(ValueKey('medication-lane-${medication.id}')),
-          )
-          .label,
-      'calendar lane 1',
+      find.byKey(ValueKey('medication-lane-${medication.id}')),
+      findsOneWidget,
     );
-    laneSemantics.dispose();
+    expect(find.textContaining('calendar lane'), findsNothing);
     await tester.tap(find.byKey(ValueKey('medication-${medication.id}')));
     await _pumpFrames(tester);
 
@@ -884,7 +1277,7 @@ void main() {
     semanticsHandle.dispose();
   });
 
-  testWidgets('medication without a derivable window has no calendar lane', (
+  testWidgets('medication without a derivable window has no calendar marker', (
     tester,
   ) async {
     final medication = await medications.insert(
@@ -967,8 +1360,9 @@ void main() {
         active: true,
       ),
     );
+    await settings.setMedicationColour(medication.id!, 'magenta');
     await pumpApp(tester);
-    expect(find.text('Progesterone'), findsOneWidget);
+    expect(find.text('Progesterone'), findsWidgets);
 
     await tester.tap(find.text('SETTINGS'));
     await _pumpFrames(tester);
@@ -994,6 +1388,14 @@ void main() {
     await _pumpFrames(tester);
 
     expect(await medications.listMedications(), isEmpty);
+    expect(
+      await database.query(
+        'settings',
+        where: 'key = ?',
+        whereArgs: ['colour_medication_${medication.id}'],
+      ),
+      isEmpty,
+    );
     await tester.pumpWidget(const SizedBox.shrink());
     await pumpApp(tester);
     expect(find.text('Progesterone'), findsNothing);
@@ -1146,7 +1548,7 @@ void main() {
         of: find.byKey(const ValueKey('settings-list')),
         matching: find.byType(ListTile),
       ),
-      findsNWidgets(4),
+      findsNWidgets(5),
     );
     expect(find.text('Medications'), findsNothing);
     expect(find.text('Period records'), findsNothing);
@@ -1161,6 +1563,7 @@ void main() {
     );
     expect(find.text('ics · json · pdf'), findsOneWidget);
     expect(find.text('Theme'), findsOneWidget);
+    expect(find.text('Colours'), findsOneWidget);
     expect(find.text('system'), findsOneWidget);
 
     final semanticsHandle = tester.ensureSemantics();
@@ -1267,6 +1670,20 @@ void main() {
     expect(find.text('1 Apr 2026 – 27 Jun 2026'), findsOneWidget);
     expect(find.text('1 Jan 2026 – 27 Jun 2026'), findsOneWidget);
     expect(find.text('1 Jul 2025 – 27 Jun 2026'), findsOneWidget);
+  });
+
+  testWidgets('calendar scrolls 12 months past the current month', (
+    tester,
+  ) async {
+    await pumpApp(tester);
+
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('month-2027-06')),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.byKey(const ValueKey('month-2027-06')), findsOneWidget);
+    expect(find.byKey(const ValueKey('month-2027-07')), findsNothing);
   });
 
   testWidgets('dark theme selection persists across an app restart', (

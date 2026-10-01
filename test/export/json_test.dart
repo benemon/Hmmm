@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hmmm/data/database.dart';
 import 'package:hmmm/data/medication_repository.dart';
 import 'package:hmmm/data/period_repository.dart';
+import 'package:hmmm/data/settings_repository.dart';
 import 'package:hmmm/data/symptom_repository.dart';
 import 'package:hmmm/domain/cycle_lengths.dart';
 import 'package:hmmm/domain/dates.dart';
@@ -39,6 +40,22 @@ void main() {
     await importJson(database, before);
 
     expect(await exportJson(database, exportedAt: exportedAt), before);
+  });
+
+  test('backup round trip keeps band colour settings', () async {
+    final settings = SettingsRepository(database);
+    await settings.load();
+    await settings.setPeriodColour('green');
+    await settings.setMedicationColour(1, 'magenta');
+    final backup = await exportJson(database, exportedAt: exportedAt);
+
+    await database.delete('settings');
+    await importJson(database, backup);
+
+    final restored = SettingsRepository(database);
+    await restored.load();
+    expect(restored.periodColourId, 'green');
+    expect(restored.medicationColourId(1, 0), 'magenta');
   });
 
   test('format version 2 is rejected before current data is changed', () async {

@@ -359,4 +359,25 @@ void main() {
     expect(output, contains('DTEND;VALUE=DATE:20260616'));
     expect(output, isNot(contains('DTEND;VALUE=DATE:20260628')));
   });
+
+  test('end-not-recorded period exports as a one-day event', () {
+    final output = buildIcs(
+      periods: [
+        Period(start: DateTime(2026, 5, 10)),
+        Period(start: DateTime(2026, 6, 2), end: DateTime(2026, 6, 6)),
+      ],
+      windowsByMedication: const [],
+      symptomDaysByType: const [],
+      range: DateRange(start: DateTime(2026, 5, 1), end: DateTime(2026, 6, 15)),
+      exportedAt: DateTime(2026, 6, 15),
+    );
+
+    expect(
+      output,
+      contains(
+        'DTSTART;VALUE=DATE:20260510\r\n'
+        'DTEND;VALUE=DATE:20260511\r\n',
+      ),
+    );
+  });
 }

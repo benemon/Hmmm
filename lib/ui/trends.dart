@@ -8,6 +8,7 @@ import '../data/symptom_repository.dart';
 import '../domain/calendar.dart';
 import '../domain/cycle_lengths.dart';
 import '../domain/models.dart';
+import '../domain/periods.dart';
 import '../domain/trends.dart';
 import 'empty_state.dart';
 import 'format.dart';
@@ -43,11 +44,15 @@ class _TrendsScreenState extends State<TrendsScreen> {
     ]);
   }
 
-  Future<_TrendsData> _loadData() async => _TrendsData(
-    periods: await widget.periodRepository.listPeriods(),
-    types: await widget.symptomRepository.listTypes(),
-    entries: await widget.symptomRepository.listEntries(),
-  );
+  Future<_TrendsData> _loadData() async {
+    final periods = await widget.periodRepository.listPeriods();
+    return _TrendsData(
+      periods: periods,
+      derivedPeriods: derivePeriods(periods),
+      types: await widget.symptomRepository.listTypes(),
+      entries: await widget.symptomRepository.listEntries(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,11 +78,13 @@ class _TrendsScreenState extends State<TrendsScreen> {
 class _TrendsData {
   const _TrendsData({
     required this.periods,
+    required this.derivedPeriods,
     required this.types,
     required this.entries,
   });
 
   final List<Period> periods;
+  final List<DerivedPeriod> derivedPeriods;
   final List<SymptomType> types;
   final List<SymptomEntry> entries;
 }
@@ -123,7 +130,7 @@ class _TrendsBody extends StatelessWidget {
           )
         else ...[
           _CyclesTable(
-            periods: data.periods,
+            periods: data.derivedPeriods,
             lengths: cycleLengths,
             today: today,
             onTap: (period) => showPeriodRecordEditor(
@@ -279,7 +286,7 @@ class _CyclesTable extends StatelessWidget {
     required this.onTap,
   });
 
-  final List<Period> periods;
+  final List<DerivedPeriod> periods;
   final List<int?> lengths;
   final DateTime today;
   final ValueChanged<Period> onTap;
@@ -287,14 +294,17 @@ class _CyclesTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final records = periods.indexed.toList().reversed.map((record) {
-      final (index, period) = record;
-      final days = recordedPeriodLength(period, today);
+      final (index, derived) = record;
+      final period = derived.period;
+      final days = recordedPeriodLength(derived, today);
       return (
         start: formatDate(period.start),
         days: days,
-        daysSemantic: '$days days',
+        daysSemantic: derived.isEndNotRecorded
+            ? '1 day · end not recorded'
+            : '$days ${days == 1 ? 'day' : 'days'}',
         daysVisual: '$days',
-        cycle: _cycleValue(period, lengths[index]),
+        cycle: _cycleValue(derived, lengths[index]),
         period: period,
       );
     }).toList();
@@ -958,9 +968,9 @@ class _SemanticTableRow extends StatelessWidget {
   }
 }
 
-String _cycleValue(Period period, int? length) {
+String _cycleValue(DerivedPeriod period, int? length) {
   if (length != null) return '$length';
-  return period.end == null ? 'open' : 'latest';
+  return period.isOngoing ? 'open' : 'latest';
 }
 
 String _formatMean(double mean) => mean == mean.roundToDouble()

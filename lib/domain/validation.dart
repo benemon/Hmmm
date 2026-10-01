@@ -15,15 +15,16 @@ void validatePeriod(
     throw ArgumentError('Period end must be on or after its start.');
   }
 
-  for (final other in existing) {
-    if (excludingId != null && other.id == excludingId) {
-      continue;
-    }
-    final startsBeforeOtherEnds =
-        other.end == null || !period.start.isAfter(other.end!);
-    final endsAfterOtherStarts =
-        period.end == null || !period.end!.isBefore(other.start);
-    if (startsBeforeOtherEnds && endsAfterOtherStarts) {
+  final periods = [
+    for (final other in existing)
+      if (excludingId == null || other.id != excludingId) other,
+    period,
+  ]..sort((left, right) => left.start.compareTo(right.start));
+  for (var index = 0; index + 1 < periods.length; index++) {
+    final current = periods[index];
+    final next = periods[index + 1];
+    if (current.start == next.start ||
+        (current.end != null && !current.end!.isBefore(next.start))) {
       throw ArgumentError('Period dates overlap an existing period.');
     }
   }
