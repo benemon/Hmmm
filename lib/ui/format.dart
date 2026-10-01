@@ -48,10 +48,11 @@ String formatPeriodRange(DateTime start, DateTime? end) =>
 Future<DateTime?> pickDate(
   BuildContext context,
   DateTime initialDate,
-  DateTime today,
-) => showDatePicker(
+  DateTime lastDate, {
+  DateTime? firstDate,
+}) => showDatePicker(
   context: context,
   initialDate: initialDate,
-  firstDate: DateTime(1900),
-  lastDate: today,
+  firstDate: firstDate ?? DateTime(1900),
+  lastDate: lastDate,
 );

@@ -26,6 +26,58 @@ void main() {
     );
   });
 
+  test('ordered overlap validation handles historical starts and edits', () {
+    expect(
+      () => validatePeriod(Period(start: DateTime(2025, 8, 13)), [
+        Period(id: 1, start: DateTime(2025, 9, 17), end: DateTime(2025, 9, 23)),
+      ], today: today),
+      returnsNormally,
+    );
+
+    expect(
+      () => validatePeriod(Period(start: DateTime(2026, 5, 10)), [
+        Period(id: 1, start: DateTime(2026, 5, 10)),
+      ], today: today),
+      throwsA(
+        isA<ArgumentError>().having(
+          (error) => error.message,
+          'message',
+          'Period dates overlap an existing period.',
+        ),
+      ),
+    );
+
+    expect(
+      () => validatePeriod(
+        Period(start: DateTime(2026, 5, 1), end: DateTime(2026, 5, 10)),
+        [Period(id: 1, start: DateTime(2026, 5, 10))],
+        today: today,
+      ),
+      throwsA(
+        isA<ArgumentError>().having(
+          (error) => error.message,
+          'message',
+          'Period dates overlap an existing period.',
+        ),
+      ),
+    );
+
+    final existing = [
+      Period(id: 1, start: DateTime(2026, 5, 1)),
+      Period(id: 2, start: DateTime(2026, 5, 20), end: DateTime(2026, 5, 24)),
+    ];
+
+    expect(
+      () => validatePeriod(
+        Period(id: 1, start: DateTime(2026, 5, 2)),
+        existing,
+        today: today,
+        excludingId: 1,
+      ),
+      returnsNormally,
+    );
+  });
+
   test('period end before start is rejected', () {
     expect(
       () => validatePeriod(

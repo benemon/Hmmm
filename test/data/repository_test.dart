@@ -22,6 +22,10 @@ void main() {
   tearDown(() => database.close());
 
   test('schema v2 exists and built-in symptom types are seeded', () async {
+    expect(
+      (await database.rawQuery('PRAGMA user_version')).single['user_version'],
+      2,
+    );
     final tableRows = await database.query(
       'sqlite_master',
       columns: ['name'],
@@ -91,6 +95,36 @@ void main() {
         {'key': 'require_unlock', 'value': 'false'},
         {'key': 'theme_mode', 'value': 'system'},
       ]),
+    );
+  });
+
+  test('band colours persist, fall back, and clear', () async {
+    final repository = SettingsRepository(database);
+    await database.insert('settings', {
+      'key': 'colour_medication_9',
+      'value': 'unknown',
+    });
+    await repository.load();
+
+    expect(repository.periodColourId, 'red');
+    expect(repository.medicationColourId(9, 1), 'amber');
+    await repository.setPeriodColour('teal');
+    await repository.setMedicationColour(9, 'magenta');
+
+    final reloaded = SettingsRepository(database);
+    await reloaded.load();
+    expect(reloaded.periodColourId, 'teal');
+    expect(reloaded.medicationColourId(9, 1), 'magenta');
+
+    await reloaded.clearMedicationColour(9);
+    expect(reloaded.medicationColourId(9, 1), 'amber');
+    expect(
+      await database.query(
+        'settings',
+        where: 'key = ?',
+        whereArgs: ['colour_medication_9'],
+      ),
+      isEmpty,
     );
   });
 

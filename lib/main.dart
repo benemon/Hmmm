@@ -64,29 +64,43 @@ class HmmmApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: settingsRepository,
-      builder: (context, child) => MaterialApp(
-        title: 'Hmmm',
-        theme: hmmmTheme(Brightness.light),
-        darkTheme: hmmmTheme(Brightness.dark),
-        themeMode: switch (settingsRepository.themeMode) {
-          AppThemeMode.system => ThemeMode.system,
-          AppThemeMode.light => ThemeMode.light,
-          AppThemeMode.dark => ThemeMode.dark,
-        },
-        home: AppLockGate(
-          settingsRepository: settingsRepository,
-          authenticator: authenticator,
-          child: HomeShell(
-            periodRepository: periodRepository,
-            medicationRepository: medicationRepository,
-            symptomRepository: symptomRepository,
-            settingsRepository: settingsRepository,
-            backupRepository: backupRepository,
-            authenticator: authenticator,
-            today: today,
+      builder: (context, child) {
+        Markers markers(Brightness brightness) => Markers.resolved(
+          brightness: brightness,
+          periodColourId: settingsRepository.periodColourId,
+          medicationColourIds: settingsRepository.medicationColourIds,
+        );
+
+        return MaterialApp(
+          title: 'Hmmm',
+          theme: hmmmTheme(
+            Brightness.light,
+            markers: markers(Brightness.light),
           ),
-        ),
-      ),
+          darkTheme: hmmmTheme(
+            Brightness.dark,
+            markers: markers(Brightness.dark),
+          ),
+          themeMode: switch (settingsRepository.themeMode) {
+            AppThemeMode.system => ThemeMode.system,
+            AppThemeMode.light => ThemeMode.light,
+            AppThemeMode.dark => ThemeMode.dark,
+          },
+          home: AppLockGate(
+            settingsRepository: settingsRepository,
+            authenticator: authenticator,
+            child: HomeShell(
+              periodRepository: periodRepository,
+              medicationRepository: medicationRepository,
+              symptomRepository: symptomRepository,
+              settingsRepository: settingsRepository,
+              backupRepository: backupRepository,
+              authenticator: authenticator,
+              today: today,
+            ),
+          ),
+        );
+      },
     );
   }
 }

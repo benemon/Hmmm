@@ -1,5 +1,5 @@
 #!/bin/sh
-# Static gate: fails on the cheap, greppable regressions the house review caught.
+# Static gate: fails on greppable regressions in docs, brand assets, and comments.
 set -u
 cd "$(dirname "$0")/.."
 fail=0

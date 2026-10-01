@@ -11,6 +11,7 @@ import '../domain/calendar.dart';
 import '../domain/dates.dart';
 import '../domain/hrt_window.dart';
 import '../domain/models.dart';
+import '../domain/periods.dart';
 import 'day_detail.dart';
 import 'format.dart';
 import 'marker_band.dart';
@@ -85,7 +86,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
           adjustment;
     }
     return _CalendarData(
-      periods: periods,
+      recordedPeriods: periods,
+      periods: derivePeriods(periods),
       medications: medications,
       types: types,
       entries: entries,
@@ -263,6 +265,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
 class _CalendarData {
   const _CalendarData({
+    required this.recordedPeriods,
     required this.periods,
     required this.medications,
     required this.types,
@@ -274,7 +277,8 @@ class _CalendarData {
     required this.finalMonth,
   });
 
-  final List<Period> periods;
+  final List<Period> recordedPeriods;
+  final List<DerivedPeriod> periods;
   final List<Medication> medications;
   final List<SymptomType> types;
   final List<SymptomEntry> entries;
@@ -299,14 +303,16 @@ class _CalendarLegend extends StatelessWidget {
     final markers = Markers.of(context);
     final medicationsWithLanes = [
       for (final medication in medications)
-        (medication, markers.lane(laneByMedicationId[medication.id!]!)),
+        (
+          medication,
+          markers.course(medication.id!, laneByMedicationId[medication.id!]!),
+        ),
     ];
     final semantics = [
       'Legend.',
       'Period.',
-      for (final (medication, lane) in medicationsWithLanes)
-        '${lane.label} '
-            '${medication.name}${medication.active ? '' : ' stopped'}.',
+      for (final (medication, _) in medicationsWithLanes)
+        '${medication.name}${medication.active ? '' : ' stopped'}.',
       'Symptoms shown as shapes.',
     ].join(' ');
     final surface = Theme.of(context).colorScheme.surface;
@@ -342,7 +348,6 @@ class _CalendarLegend extends StatelessWidget {
                       color: lane.color,
                       texture: lane.texture,
                       height: Dim.laneBandHeight,
-                      laneLabel: lane.label,
                       name: medication.active
                           ? medication.name
                           : '${medication.name} (stopped)',
@@ -379,13 +384,11 @@ class _LegendItem extends StatelessWidget {
     required this.texture,
     required this.height,
     required this.name,
-    this.laneLabel,
   });
 
   final Color color;
   final MarkerTexture texture;
   final double height;
-  final String? laneLabel;
   final String name;
 
   @override
@@ -402,10 +405,6 @@ class _LegendItem extends StatelessWidget {
             child: MarkerBand(color: color, height: height, texture: texture),
           ),
           const SizedBox(width: 6),
-          if (laneLabel != null) ...[
-            Text(laneLabel!, style: Theme.of(context).textTheme.labelSmall),
-            const SizedBox(width: 6),
-          ],
           Text(name, softWrap: false, style: nameStyle),
         ],
       ),
@@ -692,6 +691,7 @@ class _MonthStripState extends State<_MonthStrip> {
         : null,
     month: _months[index],
     today: widget.today,
+    recordedPeriods: widget.data.recordedPeriods,
     periods: widget.data.periods,
     medications: widget.data.medications,
     windowsByMedicationId: widget.data.windowsByMedicationId,
@@ -830,6 +830,7 @@ class _MonthSection extends StatelessWidget {
     super.key,
     required this.month,
     required this.today,
+    required this.recordedPeriods,
     required this.periods,
     required this.medications,
     required this.windowsByMedicationId,
@@ -850,7 +851,8 @@ class _MonthSection extends StatelessWidget {
 
   final DateTime month;
   final DateTime today;
-  final List<Period> periods;
+  final List<Period> recordedPeriods;
+  final List<DerivedPeriod> periods;
   final List<Medication> medications;
   final Map<int, List<MedicationWindow>> windowsByMedicationId;
   final Map<int, int> laneByMedicationId;
@@ -894,30 +896,101 @@ class _MonthSection extends StatelessWidget {
     return Column(
       children: [
         for (var row = 0; row < 6; row++)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var column = 0; column < 7; column++)
-                Expanded(
-                  child: _buildCell(firstOffset, row * 7 + column, daysInMonth),
-                ),
-            ],
-          ),
+          _buildWeek(firstOffset, row, daysInMonth),
       ],
     );
   }
 
-  Widget _buildCell(int firstOffset, int index, int daysInMonth) {
-    final dayNumber = index - firstOffset + 1;
-    if (dayNumber < 1 || dayNumber > daysInMonth) {
-      return SizedBox(height: Dim.dayCellHeight(medications.length));
+  Widget _buildWeek(int firstOffset, int row, int daysInMonth) {
+    final dates = <DateTime?>[];
+    final markers = <DayCellMarkerData?>[];
+    for (var column = 0; column < 7; column++) {
+      final dayNumber = row * 7 + column - firstOffset + 1;
+      final date = dayNumber < 1 || dayNumber > daysInMonth
+          ? null
+          : DateTime(month.year, month.month, dayNumber);
+      dates.add(date);
+      markers.add(date == null ? null : _marker(date));
     }
-    final date = DateTime(month.year, month.month, dayNumber);
-    final marker = _marker(date);
+    final segments = courseWeekSegments(markers);
+
+    return SizedBox(
+      height: Dim.dayCellHeight(medications.length),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final cellWidth = constraints.maxWidth / 7;
+          return Stack(
+            children: [
+              for (final segment in segments)
+                Positioned(
+                  top:
+                      Dim.dateAreaHeight +
+                      Dim.laneGap +
+                      segment.laneIndex * Dim.lanePitch,
+                  left:
+                      cellWidth * segment.startColumn +
+                      (segment.capStart ? Dim.s1 : 1),
+                  right:
+                      constraints.maxWidth -
+                      cellWidth * (segment.endColumn + 1) +
+                      (segment.capEnd ? Dim.s1 : 1),
+                  height: Dim.courseBandHeight,
+                  child: switch (Markers.of(context)
+                      .course(segment.medicationId, segment.laneIndex)) {
+                    final lane => CourseBand(
+                      key: ValueKey(
+                        'course-segment-${dateToIso(dates[segment.startColumn]!)}-'
+                        '${segment.medicationId}',
+                      ),
+                      color: lane.color,
+                      texture: lane.texture,
+                      capStart: segment.capStart,
+                      capEnd: segment.capEnd,
+                      name: segment.length > 1
+                          ? medicationById[segment.medicationId]!.name
+                          : null,
+                    ),
+                  },
+                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var column = 0; column < 7; column++)
+                    Expanded(
+                      child: dates[column] == null
+                          ? const SizedBox.expand()
+                          : _buildCell(
+                              dates[column]!,
+                              markers[column]!,
+                              cycleDayForDate(dates[column]!, recordedPeriods),
+                              column,
+                            ),
+                    ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCell(
+    DateTime date,
+    DayCellMarkerData marker,
+    int? cycleDay,
+    int column,
+  ) {
+    final currentDate = dateOnly(today);
     return _DayCell(
       date: date,
       today: today,
+      isFuture: date.isAfter(currentDate),
+      isToday: date == currentDate,
       marker: marker,
+      cycleDay: date.isAfter(currentDate) ? null : cycleDay,
+      periodCapStart: marker.startsPeriod || column == 0,
+      periodCapEnd: marker.endsPeriod || column == 6,
       medicationCount: medications.length,
       medicationById: medicationById,
       onTap: () => onDayTap(date),
@@ -1004,7 +1077,12 @@ class _DayCell extends StatefulWidget {
   const _DayCell({
     required this.date,
     required this.today,
+    required this.isFuture,
+    required this.isToday,
     required this.marker,
+    required this.cycleDay,
+    required this.periodCapStart,
+    required this.periodCapEnd,
     required this.medicationCount,
     required this.medicationById,
     required this.onTap,
@@ -1019,7 +1097,12 @@ class _DayCell extends StatefulWidget {
 
   final DateTime date;
   final DateTime today;
+  final bool isFuture;
+  final bool isToday;
   final DayCellMarkerData marker;
+  final int? cycleDay;
+  final bool periodCapStart;
+  final bool periodCapEnd;
   final int medicationCount;
   final Map<int, Medication> medicationById;
   final VoidCallback onTap;
@@ -1041,7 +1124,6 @@ class _DayCellState extends State<_DayCell> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final isToday = widget.date == dateOnly(widget.today);
 
     final cell = Focus(
       onFocusChange: (focused) => setState(() => _focused = focused),
@@ -1070,19 +1152,14 @@ class _DayCellState extends State<_DayCell> {
                       ),
                     ),
                   ),
-                if (isToday)
-                  Positioned.fill(
-                    child: Container(
-                      margin: const EdgeInsets.all(1),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: scheme.onSurface, width: 2),
-                        borderRadius: BorderRadius.circular(Dim.radiusToday),
-                      ),
-                    ),
-                  ),
                 _DayCellContents(
                   date: widget.date,
+                  isFuture: widget.isFuture,
+                  isToday: widget.isToday,
                   marker: widget.marker,
+                  cycleDay: widget.cycleDay,
+                  periodCapStart: widget.periodCapStart,
+                  periodCapEnd: widget.periodCapEnd,
                   medicationCount: widget.medicationCount,
                 ),
               ],
@@ -1130,72 +1207,100 @@ class _DayCellState extends State<_DayCell> {
 class _DayCellContents extends StatelessWidget {
   const _DayCellContents({
     required this.date,
+    required this.isFuture,
+    required this.isToday,
     required this.marker,
+    required this.cycleDay,
+    required this.periodCapStart,
+    required this.periodCapEnd,
     required this.medicationCount,
   });
 
   final DateTime date;
+  final bool isFuture;
+  final bool isToday;
   final DayCellMarkerData marker;
+  final int? cycleDay;
+  final bool periodCapStart;
+  final bool periodCapEnd;
   final int medicationCount;
 
   @override
   Widget build(BuildContext context) {
     final markers = Markers.of(context);
+    final scheme = Theme.of(context).colorScheme;
     final dateIso = dateToIso(date);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    const dateRowTop = 16.0;
+    return Stack(
       children: [
-        Padding(
-          padding: const EdgeInsets.only(
-            left: Dim.s1,
-            right: Dim.s1,
-            top: Dim.s1,
+        if (marker.inPeriod)
+          Positioned(
+            key: ValueKey('period-capsule-$dateIso'),
+            top: dateRowTop,
+            left: 0,
+            right: 0,
+            height: Dim.periodCapsuleHeight,
+            child: PeriodCapsule(
+              color: markers.period,
+              capStart: periodCapStart,
+              capEnd: periodCapEnd,
+            ),
           ),
-          child: Text('${date.day}', style: HmmmType.of(context).dayNumber),
-        ),
-        const SizedBox(height: Dim.s1),
-        SizedBox(
-          height: Dim.periodBandHeight,
-          child: marker.inPeriod
-              ? MarkerBand(
-                  color: markers.period,
-                  height: Dim.periodBandHeight,
-                  texture: MarkerTexture.solid,
-                  capStart: marker.startsPeriod,
-                  capEnd: marker.endsPeriod,
-                )
-              : null,
-        ),
-        const SizedBox(height: Dim.s1),
-        SizedBox(
-          height: medicationCount * Dim.lanePitch,
-          child: Stack(
-            children: [
-              for (final medication in marker.medicationMarkers)
-                Positioned(
-                  key: ValueKey(
-                    'medication-band-$dateIso-'
-                    '${medication.medicationId}',
-                  ),
-                  top: medication.laneIndex * Dim.lanePitch,
-                  left: 0,
-                  right: 0,
-                  height: Dim.laneBandHeight,
-                  child: switch (markers.lane(medication.laneIndex)) {
-                    final lane => MarkerBand(
-                      color: lane.color,
-                      height: Dim.laneBandHeight,
-                      texture: lane.texture,
-                      capStart: medication.startsWindow,
-                      capEnd: medication.endsWindow,
-                    ),
-                  },
-                ),
-            ],
+        if (cycleDay case final cycleDay?)
+          Positioned(
+            key: ValueKey('cycle-day-$dateIso'),
+            left: 5,
+            top: 2,
+            child: Text(
+              '$cycleDay',
+              style: Theme.of(context).textTheme.labelSmall!.copyWith(
+                color: cycleDay == 1 ? markers.period : scheme.onSurface,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                height: 14 / 11,
+                letterSpacing: 0,
+              ),
+            ),
+          ),
+        Positioned(
+          top: dateRowTop,
+          left: 0,
+          right: 0,
+          height: Dim.periodCapsuleHeight,
+          child: Center(
+            child: Text(
+              '${date.day}',
+              style: HmmmType.of(context).dayNumber.copyWith(
+                color: marker.inPeriod
+                    ? markers.inkOnBand
+                    : isFuture
+                    ? scheme.onSurfaceVariant
+                    : scheme.onSurface,
+              ),
+            ),
           ),
         ),
-        const Spacer(),
-        SizedBox(
+        if (isToday)
+          Positioned(
+            key: ValueKey('today-ring-$dateIso'),
+            top: dateRowTop - 1,
+            left: 0,
+            right: 0,
+            height: Dim.periodCapsuleHeight + 2,
+            child: Center(
+              child: SizedBox.square(
+                dimension: Dim.periodCapsuleHeight + 2,
+                child: TodayRing(color: scheme.onSurface),
+              ),
+            ),
+          ),
+        Positioned(
+          top:
+              Dim.dateAreaHeight +
+              Dim.laneGap +
+              medicationCount * Dim.lanePitch,
+          left: 0,
+          right: 0,
           height: Dim.s3,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: Dim.s1),
@@ -1217,7 +1322,6 @@ class _DayCellContents extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: Dim.s1),
       ],
     );
   }
@@ -1255,7 +1359,8 @@ class _CourseDragFeedback extends StatelessWidget {
       final label =
           'starts ${formatDayMonth(start)}'
           '${daysSince == null ? '' : ' · $daysSince days since last course started'}';
-      final lane = Markers.of(context).lane(drag.laneIndex);
+      final lane = Markers.of(context)
+          .course(drag.medication.id!, drag.laneIndex);
       return TweenAnimationBuilder<double>(
         tween: Tween(begin: 0.96, end: 1),
         duration: Motion.scaled(context, Motion.state),
@@ -1426,7 +1531,8 @@ class _AgendaLaneChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final lane = Markers.of(context).lane(marker.laneIndex);
+    final lane = Markers.of(context)
+        .course(marker.medicationId, marker.laneIndex);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: Dim.s2, vertical: Dim.s1),
       decoration: BoxDecoration(
@@ -1444,8 +1550,6 @@ class _AgendaLaneChip extends StatelessWidget {
               texture: lane.texture,
             ),
           ),
-          const SizedBox(width: 6),
-          Text(lane.label, style: Theme.of(context).textTheme.labelSmall),
           const SizedBox(width: 6),
           Text(name, softWrap: false),
         ],
@@ -1494,7 +1598,7 @@ DateTime _lastDerivedMonth(
   List<Medication> medications,
   Map<int, List<MedicationWindow>> windowsByMedicationId,
 ) {
-  var lastDate = DateTime(currentMonth.year, currentMonth.month + 1, 0);
+  var lastDate = DateTime(currentMonth.year, currentMonth.month + 13, 0);
   for (final windows in windowsByMedicationId.values) {
     for (final window in windows) {
       if (window.sourcePeriodStart != null && window.end.isAfter(lastDate)) {

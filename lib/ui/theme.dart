@@ -1,7 +1,100 @@
 import 'package:flutter/material.dart';
 
+import '../domain/colours.dart';
+
 const _sans = 'Public Sans';
 const _mono = 'DM Mono';
+const _redLight = Color(0xFFB4243C);
+const _redDark = Color(0xFFF2707E);
+const _blueLight = Color(0xFF1E5AA8);
+const _blueDark = Color(0xFF7FB2F0);
+const _amberLight = Color(0xFF8A5A00);
+const _amberDark = Color(0xFFE0A63C);
+const _purpleLight = Color(0xFF6B3FA0);
+const _purpleDark = Color(0xFFC29BF2);
+const _tealLight = Color(0xFF00736B);
+const _tealDark = Color(0xFF4FC6B8);
+const _greenLight = Color(0xFF3B7A1E);
+const _greenDark = Color(0xFF8FCB6B);
+const _magentaLight = Color(0xFFA1276F);
+const _magentaDark = Color(0xFFEE8AC4);
+const _slateLight = Color(0xFF55534A);
+const _slateDark = Color(0xFFB3B1A4);
+
+class BandColourSwatch {
+  const BandColourSwatch({
+    required this.id,
+    required this.name,
+    required this.light,
+    required this.dark,
+  });
+
+  final String id;
+  final String name;
+  final Color light;
+  final Color dark;
+
+  Color forBrightness(Brightness brightness) =>
+      brightness == Brightness.light ? light : dark;
+}
+
+final bandColourSwatches = [
+  BandColourSwatch(
+    id: bandColourIds[0],
+    name: 'Red',
+    light: _redLight,
+    dark: _redDark,
+  ),
+  BandColourSwatch(
+    id: bandColourIds[1],
+    name: 'Blue',
+    light: _blueLight,
+    dark: _blueDark,
+  ),
+  BandColourSwatch(
+    id: bandColourIds[2],
+    name: 'Amber',
+    light: _amberLight,
+    dark: _amberDark,
+  ),
+  BandColourSwatch(
+    id: bandColourIds[3],
+    name: 'Purple',
+    light: _purpleLight,
+    dark: _purpleDark,
+  ),
+  BandColourSwatch(
+    id: bandColourIds[4],
+    name: 'Teal',
+    light: _tealLight,
+    dark: _tealDark,
+  ),
+  BandColourSwatch(
+    id: bandColourIds[5],
+    name: 'Green',
+    light: _greenLight,
+    dark: _greenDark,
+  ),
+  BandColourSwatch(
+    id: bandColourIds[6],
+    name: 'Magenta',
+    light: _magentaLight,
+    dark: _magentaDark,
+  ),
+  BandColourSwatch(
+    id: bandColourIds[7],
+    name: 'Slate',
+    light: _slateLight,
+    dark: _slateDark,
+  ),
+];
+
+BandColourSwatch? bandColourSwatchById(String id) {
+  for (final swatch in bandColourSwatches) {
+    if (swatch.id == id) return swatch;
+  }
+  return null;
+}
 
 enum MarkerTexture { solid, dotted, dashed, fineDot }
 
@@ -25,110 +118,101 @@ abstract final class MarkerTextureMetrics {
 }
 
 class MarkerLane {
-  const MarkerLane({
-    required this.color,
-    required this.texture,
-    required this.label,
-  });
+  const MarkerLane({required this.color, required this.texture});
 
   final Color color;
   final MarkerTexture texture;
-  final String label;
 }
 
-/// Marker lane identity is position + texture + L-label, before hue. The
-/// contrast-first L1/L3 palette converges under CVD and sits below normal-
-/// vision hue separation, so textures are load-bearing and may never be
-/// dropped.
+/// Marker lane identity is position + texture, before hue. The palette
+/// converges under CVD, so textures are load-bearing and may never be dropped.
 class Markers extends ThemeExtension<Markers> {
   const Markers({
     required this.period,
+    required this.inkOnBand,
     required this.lanes,
     required this.overflow,
+    this.medicationColours = const {},
   });
 
   final Color period;
+  final Color inkOnBand;
   final List<MarkerLane> lanes;
   final MarkerLane overflow;
+  final Map<int, Color> medicationColours;
 
   MarkerLane lane(int index) =>
       index >= 0 && index < lanes.length ? lanes[index] : overflow;
 
-  static const light = Markers(
-    period: Color(0xFFB4243C),
+  MarkerLane course(int medicationId, int laneIndex) {
+    final laneMarker = lane(laneIndex);
+    return MarkerLane(
+      color: medicationColours[medicationId] ?? laneMarker.color,
+      texture: laneMarker.texture,
+    );
+  }
+
+  factory Markers.resolved({
+    required Brightness brightness,
+    required String periodColourId,
+    required Map<int, String> medicationColourIds,
+  }) {
+    final defaults = brightness == Brightness.light ? light : dark;
+    return defaults.copyWith(
+      period:
+          bandColourSwatchById(periodColourId)?.forBrightness(brightness) ??
+          defaults.period,
+      medicationColours: {
+        for (final entry in medicationColourIds.entries)
+          if (bandColourSwatchById(entry.value) case final swatch?)
+            entry.key: swatch.forBrightness(brightness),
+      },
+    );
+  }
+
+  static final light = Markers(
+    period: _redLight,
+    inkOnBand: const Color(0xFFFFFFFF),
     lanes: [
-      MarkerLane(
-        color: Color(0xFF1E5AA8),
-        texture: MarkerTexture.solid,
-        label: 'L1',
-      ),
-      MarkerLane(
-        color: Color(0xFF8A5A00),
-        texture: MarkerTexture.dotted,
-        label: 'L2',
-      ),
-      MarkerLane(
-        color: Color(0xFF6B3FA0),
-        texture: MarkerTexture.dashed,
-        label: 'L3',
-      ),
+      for (final (index, id) in medicationLaneColourIds.take(3).indexed)
+        MarkerLane(
+          color: bandColourSwatchById(id)!.light,
+          texture: MarkerTexture.values[index],
+        ),
     ],
     overflow: MarkerLane(
-      color: Color(0xFF55534A),
+      color: bandColourSwatchById(medicationLaneColourIds.last)!.light,
       texture: MarkerTexture.fineDot,
-      label: 'L4+',
     ),
   );
 
-  static const dark = Markers(
-    period: Color(0xFFF2707E),
+  static final dark = Markers(
+    period: _redDark,
+    inkOnBand: const Color(0xFF131311),
     lanes: [
-      MarkerLane(
-        color: Color(0xFF7FB2F0),
-        texture: MarkerTexture.solid,
-        label: 'L1',
-      ),
-      MarkerLane(
-        color: Color(0xFFE0A63C),
-        texture: MarkerTexture.dotted,
-        label: 'L2',
-      ),
-      MarkerLane(
-        color: Color(0xFFC29BF2),
-        texture: MarkerTexture.dashed,
-        label: 'L3',
-      ),
+      for (final (index, id) in medicationLaneColourIds.take(3).indexed)
+        MarkerLane(
+          color: bandColourSwatchById(id)!.dark,
+          texture: MarkerTexture.values[index],
+        ),
     ],
     overflow: MarkerLane(
-      color: Color(0xFFB3B1A4),
+      color: bandColourSwatchById(medicationLaneColourIds.last)!.dark,
       texture: MarkerTexture.fineDot,
-      label: 'L4+',
     ),
   );
 
   static const print = Markers(
     period: Color(0xFF000000),
+    inkOnBand: Color(0xFFFFFFFF),
     lanes: [
-      MarkerLane(
-        color: Color(0xFF000000),
-        texture: MarkerTexture.solid,
-        label: 'L1',
-      ),
-      MarkerLane(
-        color: Color(0xFF000000),
-        texture: MarkerTexture.dotted,
-        label: 'L2',
-      ),
-      MarkerLane(
-        color: Color(0xFF000000),
-        texture: MarkerTexture.dashed,
-        label: 'L3',
-      ),
+      MarkerLane(color: Color(0xFF000000), texture: MarkerTexture.solid),
+      MarkerLane(color: Color(0xFF000000), texture: MarkerTexture.dotted),
+      MarkerLane(color: Color(0xFF000000), texture: MarkerTexture.dashed),
     ],
     overflow: MarkerLane(
       color: Color(0xFF000000),
       texture: MarkerTexture.fineDot,
-      label: 'L4+',
     ),
   );
 
@@ -138,13 +222,17 @@ class Markers extends ThemeExtension<Markers> {
   @override
   Markers copyWith({
     Color? period,
+    Color? inkOnBand,
     List<MarkerLane>? lanes,
     MarkerLane? overflow,
+    Map<int, Color>? medicationColours,
   }) {
     return Markers(
       period: period ?? this.period,
+      inkOnBand: inkOnBand ?? this.inkOnBand,
       lanes: lanes ?? this.lanes,
       overflow: overflow ?? this.overflow,
+      medicationColours: medicationColours ?? this.medicationColours,
     );
   }
 
@@ -153,19 +241,26 @@ class Markers extends ThemeExtension<Markers> {
     if (other == null) return this;
     return Markers(
       period: Color.lerp(period, other.period, t)!,
+      inkOnBand: Color.lerp(inkOnBand, other.inkOnBand, t)!,
       lanes: [
         for (var index = 0; index < lanes.length; index++)
           MarkerLane(
             color: Color.lerp(lanes[index].color, other.lane(index).color, t)!,
             texture: other.lane(index).texture,
-            label: other.lane(index).label,
           ),
       ],
       overflow: MarkerLane(
         color: Color.lerp(overflow.color, other.overflow.color, t)!,
         texture: other.overflow.texture,
-        label: other.overflow.label,
       ),
+      medicationColours: {
+        for (final entry in other.medicationColours.entries)
+          entry.key: Color.lerp(
+            medicationColours[entry.key] ?? entry.value,
+            entry.value,
+            t,
+          )!,
+      },
     );
   }
 }
@@ -240,14 +335,23 @@ abstract final class Dim {
   static const daySheetHeaderHeight = 64.0;
 
   static const periodBandHeight = 6.0;
+  static const periodCapsuleHeight = 32.0;
+  static const dateAreaHeight = 52.0;
   static const laneBandHeight = 4.0;
-  static const lanePitch = 6.0;
+  static const courseBandHeight = 16.0;
+  static const laneGap = 3.0;
+  static const lanePitch = courseBandHeight + laneGap;
   static const glyphSizeCalendar = 10.0;
   static const glyphSizeTable = 12.0;
   static const glyphSizeChip = 14.0;
   static const glyphSizeList = 16.0;
 
-  static double dayCellHeight(int laneCount) => 54 + lanePitch * laneCount;
+  static double dayCellHeight(int laneCount) =>
+      dateAreaHeight +
+      laneGap +
+      glyphSizeCalendar +
+      2 * s1 +
+      lanePitch * laneCount;
 
   static double monthExtent(int laneCount) =>
       monthBandHeight + 6 * dayCellHeight(laneCount);
@@ -269,7 +373,7 @@ abstract final class Motion {
       MediaQuery.disableAnimationsOf(context) ? Duration.zero : base;
 }
 
-ThemeData hmmmTheme(Brightness brightness) {
+ThemeData hmmmTheme(Brightness brightness, {Markers? markers}) {
   final isLight = brightness == Brightness.light;
   final surface = isLight ? const Color(0xFFFBFAF7) : const Color(0xFF131311);
   final surfaceRaised = isLight
@@ -304,7 +408,7 @@ ThemeData hmmmTheme(Brightness brightness) {
     outlineVariant: rule,
     inverseSurface: inverseSurface,
     onInverseSurface: onInverseSurface,
-    error: isLight ? const Color(0xFFB4243C) : const Color(0xFFF2707E),
+    error: isLight ? _redLight : _redDark,
     onError: isLight ? const Color(0xFFFFFFFF) : const Color(0xFF33070F),
   );
 
@@ -549,6 +653,6 @@ ThemeData hmmmTheme(Brightness brightness) {
         (states) => states.contains(WidgetState.selected) ? onAction : inkMuted,
       ),
     ),
-    extensions: [isLight ? Markers.light : Markers.dark, hmmmType],
+    extensions: [markers ?? (isLight ? Markers.light : Markers.dark), hmmmType],
   );
 }

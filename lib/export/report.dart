@@ -8,6 +8,7 @@ import '../domain/cycle_lengths.dart';
 import '../domain/dates.dart';
 import '../domain/hrt_window.dart';
 import '../domain/models.dart';
+import '../domain/periods.dart';
 import '../domain/trends.dart';
 import '../ui/format.dart';
 import '../ui/symptom_glyph.dart';
@@ -18,8 +19,6 @@ class ReportLegendEntry {
 
   final Medication medication;
   final int laneIndex;
-
-  String get label => Markers.print.lane(laneIndex).label;
 }
 
 class ReportMatrixRow {
@@ -53,6 +52,7 @@ class ReportData {
     required this.range,
     required this.today,
     required this.periods,
+    required this.derivedPeriods,
     required this.symptomTypes,
     required this.symptomEntries,
     required this.windowsByMedicationId,
@@ -71,6 +71,7 @@ class ReportData {
   final DateRange range;
   final DateTime today;
   final List<Period> periods;
+  final List<DerivedPeriod> derivedPeriods;
   final List<SymptomType> symptomTypes;
   final List<SymptomEntry> symptomEntries;
   final Map<int, List<MedicationWindow>> windowsByMedicationId;
@@ -114,10 +115,12 @@ ReportData assembleReportData({
         medication,
   ]..sort((left, right) => left.id!.compareTo(right.id!));
   final lanes = laneAssignments(medicationsWithWindows);
+  final derivedPeriods = derivePeriods(periods);
   return ReportData(
     range: range,
     today: dateOnly(today),
     periods: periods,
+    derivedPeriods: derivedPeriods,
     symptomTypes: symptomTypes,
     symptomEntries: symptomEntries,
     windowsByMedicationId: windowsByMedicationId,
@@ -298,18 +301,28 @@ pw.Widget _reportHeader(
       runSpacing: 6,
       children: [
         _legendItem(
-          pw.Container(width: 20, height: 8, color: _periodShade),
+          pw.Container(
+            width: 20,
+            height: 8,
+            decoration: const pw.BoxDecoration(
+              color: PdfColors.black,
+              borderRadius: pw.BorderRadius.all(pw.Radius.circular(4)),
+            ),
+          ),
           'period',
           fonts,
         ),
         for (final entry in legendEntries)
           _legendItem(
-            _textureBand(
-              Markers.print.lane(entry.laneIndex).texture,
+            _printCourseBand(
+              texture: Markers.print.lane(entry.laneIndex).texture,
               width: 20,
-              height: 3,
+              height: 8,
+              capStart: true,
+              capEnd: true,
+              fonts: fonts,
             ),
-            '${entry.label} ${entry.medication.name} ${entry.medication.dose}',
+            '${entry.medication.name} ${entry.medication.dose}',
             fonts,
           ),
         _legendItem(_symptomGlyph(1), 'shapes', fonts),
@@ -351,115 +364,241 @@ pw.Widget _footer(pw.Context context, _ReportFonts fonts) => pw.Container(
 pw.Widget _monthGrid(ReportData data, DateTime month, _ReportFonts fonts) {
   final firstOffset = month.weekday - DateTime.monday;
   final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
-  final rows = <pw.TableRow>[
-    pw.TableRow(
-      repeat: true,
-      children: [
-        for (final weekday in const ['M', 'T', 'W', 'T', 'F', 'S', 'S'])
-          pw.Padding(
-            padding: const pw.EdgeInsets.all(2),
-            child: pw.Text(
-              weekday,
-              textAlign: pw.TextAlign.center,
-              style: pw.TextStyle(font: fonts.monoMedium, fontSize: 9),
-            ),
-          ),
-      ],
-    ),
-  ];
-  for (var week = 0; week < 6; week++) {
-    rows.add(
-      pw.TableRow(
-        children: [
-          for (var weekday = 0; weekday < 7; weekday++)
-            _monthCell(
-              data,
-              data.laneByMedicationId,
-              month,
-              week * 7 + weekday - firstOffset + 1,
-              daysInMonth,
-              fonts,
-            ),
-        ],
-      ),
-    );
-  }
-  return pw.Column(
-    crossAxisAlignment: pw.CrossAxisAlignment.start,
-    children: [
-      pw.Text(
-        '${monthsFull[month.month - 1]} ${month.year}',
-        style: pw.TextStyle(font: fonts.sansBold, fontSize: 12),
-      ),
-      pw.SizedBox(height: 3),
-      pw.Table(
-        border: pw.TableBorder.all(width: 0.35, color: _rule),
-        children: rows,
-      ),
-    ],
-  );
-}
-
-pw.Widget _monthCell(
-  ReportData data,
-  Map<int, int> lanes,
-  DateTime month,
-  int dayNumber,
-  int daysInMonth,
-  _ReportFonts fonts,
-) {
-  final height = _monthCellHeight(data.legendEntries.length);
-  if (dayNumber < 1 || dayNumber > daysInMonth) {
-    return pw.SizedBox(height: height);
-  }
-  final date = DateTime(month.year, month.month, dayNumber);
-  if (date.isBefore(data.range.start) || date.isAfter(data.range.end)) {
-    return pw.SizedBox(height: height);
-  }
-  final marker = buildDayCellMarkerData(
-    date: date,
-    today: data.today,
-    periods: data.periods,
-    windowsByMedicationId: data.windowsByMedicationId,
-    laneByMedicationId: lanes,
-    entries: data.symptomEntries,
-  );
-  return pw.Container(
-    height: height,
-    padding: const pw.EdgeInsets.all(2),
-    decoration: pw.BoxDecoration(
-      color: marker.inPeriod ? _periodShade : null,
-      border: date == data.today ? pw.Border.all(width: 1.2) : null,
-    ),
+  final medicationsById = {
+    for (final entry in data.legendEntries)
+      entry.medication.id!: entry.medication,
+  };
+  const weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  return pw.SizedBox(
+    width: reportPortraitContentWidth,
     child: pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.Text(
-          '$dayNumber',
-          style: pw.TextStyle(font: fonts.monoMedium, fontSize: 9),
+          '${monthsFull[month.month - 1]} ${month.year}',
+          style: pw.TextStyle(font: fonts.sansBold, fontSize: 12),
         ),
-        pw.SizedBox(height: 4),
-        for (final entry in data.legendEntries) ...[
-          _laneRow(marker, entry, dayNumber == 1, fonts),
-          pw.SizedBox(height: 1),
-        ],
-        pw.Spacer(),
+        pw.SizedBox(height: 3),
         pw.Row(
           children: [
-            for (final typeId in marker.visibleSymptomTypeIds) ...[
-              _symptomGlyph(typeId),
-              pw.SizedBox(width: 2),
-            ],
-            if (marker.symptomOverflowCount > 0)
-              pw.Text(
-                '+${marker.symptomOverflowCount}',
-                style: pw.TextStyle(font: fonts.mono, fontSize: 9),
+            for (final weekday in weekdays)
+              pw.SizedBox(
+                width: reportPortraitContentWidth / 7,
+                child: pw.Text(
+                  weekday,
+                  textAlign: pw.TextAlign.center,
+                  style: pw.TextStyle(font: fonts.monoMedium, fontSize: 9),
+                ),
               ),
           ],
         ),
+        pw.SizedBox(height: 2),
+        for (var week = 0; week < 6; week++)
+          _monthWeek(
+            data,
+            month,
+            week,
+            firstOffset,
+            daysInMonth,
+            medicationsById,
+            fonts,
+          ),
       ],
     ),
   );
+}
+
+pw.Widget _monthWeek(
+  ReportData data,
+  DateTime month,
+  int week,
+  int firstOffset,
+  int daysInMonth,
+  Map<int, Medication> medicationsById,
+  _ReportFonts fonts,
+) {
+  final height = _monthCellHeight(data.legendEntries.length);
+  final dates = <DateTime?>[];
+  final markers = <DayCellMarkerData?>[];
+  for (var column = 0; column < 7; column++) {
+    final dayNumber = week * 7 + column - firstOffset + 1;
+    final date = dayNumber < 1 || dayNumber > daysInMonth
+        ? null
+        : DateTime(month.year, month.month, dayNumber);
+    final inRange =
+        date != null &&
+        !date.isBefore(data.range.start) &&
+        !date.isAfter(data.range.end);
+    dates.add(inRange ? date : null);
+    markers.add(
+      inRange
+          ? buildDayCellMarkerData(
+              date: date,
+              today: data.today,
+              periods: data.derivedPeriods,
+              windowsByMedicationId: data.windowsByMedicationId,
+              laneByMedicationId: data.laneByMedicationId,
+              entries: data.symptomEntries,
+            )
+          : null,
+    );
+  }
+  final cellWidth = reportPortraitContentWidth / 7;
+  final periodSegments = _reportPeriodSegments(markers);
+  final courseSegments = courseWeekSegments(markers);
+  final cycleDays = [
+    for (final date in dates)
+      date == null || date.isAfter(data.today)
+          ? null
+          : cycleDayForDate(date, data.periods),
+  ];
+  return pw.SizedBox(
+    width: reportPortraitContentWidth,
+    height: height,
+    child: pw.Stack(
+      children: [
+        for (var column = 0; column < 7; column++)
+          pw.Positioned(
+            left: cellWidth * column,
+            right: reportPortraitContentWidth - cellWidth * (column + 1),
+            top: 0,
+            bottom: 0,
+            child: pw.Container(
+              decoration: pw.BoxDecoration(
+                border: pw.Border(
+                  right: const pw.BorderSide(width: 0.3, color: _rule),
+                  bottom: const pw.BorderSide(width: 0.3, color: _rule),
+                ),
+              ),
+            ),
+          ),
+        for (final segment in periodSegments)
+          pw.Positioned(
+            left: cellWidth * segment.$1 + cellWidth / 2 - 9,
+            right:
+                reportPortraitContentWidth -
+                (cellWidth * segment.$2 + cellWidth / 2 + 9),
+            top: 10,
+            bottom: height - 28,
+            child: pw.Container(
+              decoration: const pw.BoxDecoration(
+                color: PdfColors.black,
+                borderRadius: pw.BorderRadius.all(pw.Radius.circular(9)),
+              ),
+            ),
+          ),
+        for (final segment in courseSegments)
+          pw.Positioned(
+            left:
+                cellWidth * segment.startColumn + (segment.capStart ? 3 : 0.5),
+            right:
+                reportPortraitContentWidth -
+                cellWidth * (segment.endColumn + 1) +
+                (segment.capEnd ? 3 : 0.5),
+            top: _printDateAreaHeight + 2 + segment.laneIndex * _printLanePitch,
+            bottom:
+                height -
+                (_printDateAreaHeight +
+                    2 +
+                    segment.laneIndex * _printLanePitch +
+                    _printLaneHeight),
+            child: _printCourseBand(
+              texture: Markers.print.lane(segment.laneIndex).texture,
+              width: cellWidth * segment.length,
+              height: _printLaneHeight,
+              capStart: segment.capStart,
+              capEnd: segment.capEnd,
+              name: segment.length > 1
+                  ? medicationsById[segment.medicationId]!.name
+                  : null,
+              fonts: fonts,
+            ),
+          ),
+        for (var column = 0; column < 7; column++)
+          if (dates[column] case final date?) ...[
+            if (cycleDays[column] case final cycleDay?)
+              pw.Positioned(
+                left: cellWidth * column + 3,
+                right: reportPortraitContentWidth - cellWidth * (column + 1),
+                top: 1,
+                bottom: height - 10,
+                child: pw.Text(
+                  '$cycleDay',
+                  style: pw.TextStyle(font: fonts.monoMedium, fontSize: 7),
+                ),
+              ),
+            pw.Positioned(
+              left: cellWidth * column,
+              right: reportPortraitContentWidth - cellWidth * (column + 1),
+              top: 10,
+              bottom: height - 28,
+              child: pw.Center(
+                child: pw.Text(
+                  '${date.day}',
+                  style: pw.TextStyle(
+                    font: fonts.monoMedium,
+                    fontSize: 9,
+                    color: markers[column]!.inPeriod
+                        ? PdfColors.white
+                        : date.isAfter(data.today)
+                        ? _muted
+                        : PdfColors.black,
+                  ),
+                ),
+              ),
+            ),
+            if (date == data.today)
+              pw.Positioned(
+                left: cellWidth * column + cellWidth / 2 - 10,
+                right:
+                    reportPortraitContentWidth -
+                    (cellWidth * column + cellWidth / 2 + 10),
+                top: 9,
+                bottom: height - 29,
+                child: _printTodayRing(20),
+              ),
+            pw.Positioned(
+              left: cellWidth * column + 3,
+              right: reportPortraitContentWidth - cellWidth * (column + 1),
+              top:
+                  _printDateAreaHeight +
+                  3 +
+                  data.legendEntries.length * _printLanePitch,
+              bottom: 2,
+              child: pw.Row(
+                children: [
+                  for (final typeId
+                      in markers[column]!.visibleSymptomTypeIds) ...[
+                    _symptomGlyph(typeId),
+                    pw.SizedBox(width: 2),
+                  ],
+                  if (markers[column]!.symptomOverflowCount > 0)
+                    pw.Text(
+                      '+${markers[column]!.symptomOverflowCount}',
+                      style: pw.TextStyle(font: fonts.mono, fontSize: 7),
+                    ),
+                ],
+              ),
+            ),
+          ],
+      ],
+    ),
+  );
+}
+
+List<(int, int)> _reportPeriodSegments(List<DayCellMarkerData?> markers) {
+  final segments = <(int, int)>[];
+  int? start;
+  for (var column = 0; column <= markers.length; column++) {
+    final inPeriod =
+        column < markers.length && markers[column]?.inPeriod == true;
+    if (inPeriod && start == null) start = column;
+    if (!inPeriod && start != null) {
+      segments.add((start, column - 1));
+      start = null;
+    }
+  }
+  return segments;
 }
 
 pw.Widget _sectionHeading(String title, String basis, _ReportFonts fonts) =>
@@ -481,12 +620,12 @@ pw.Widget _sectionHeading(String title, String basis, _ReportFonts fonts) =>
 pw.Widget _cycleTable(ReportData data, _ReportFonts fonts) => _textTable(
   [
     const ['start', 'days', 'cycle'],
-    for (var index = data.periods.length - 1; index >= 0; index--)
+    for (var index = data.derivedPeriods.length - 1; index >= 0; index--)
       [
-        formatDate(data.periods[index].start),
-        '${recordedPeriodLength(data.periods[index], data.today)}',
+        formatDate(data.derivedPeriods[index].period.start),
+        '${recordedPeriodLength(data.derivedPeriods[index], data.today)}',
         data.cycleLengths[index]?.toString() ??
-            (data.periods[index].end == null ? 'open' : 'latest'),
+            (data.derivedPeriods[index].isOngoing ? 'open' : 'latest'),
       ],
   ],
   fonts,
@@ -716,14 +855,17 @@ pw.Widget _medicationCourses(ReportData data, _ReportFonts fonts) {
       for (final legendEntry in data.legendEntries) ...[
         pw.Row(
           children: [
-            _textureBand(
-              Markers.print.lane(legendEntry.laneIndex).texture,
+            _printCourseBand(
+              texture: Markers.print.lane(legendEntry.laneIndex).texture,
               width: 20,
-              height: 4,
+              height: 8,
+              capStart: true,
+              capEnd: true,
+              fonts: fonts,
             ),
             pw.SizedBox(width: 6),
             pw.Text(
-              '${legendEntry.label} ${legendEntry.medication.name} · '
+              '${legendEntry.medication.name} · '
               '${legendEntry.medication.dose} · '
               '${_scheduleText(legendEntry.medication.schedule)}',
               style: pw.TextStyle(font: fonts.mono, fontSize: 10),
@@ -765,52 +907,102 @@ pw.Widget _medicationCourses(ReportData data, _ReportFonts fonts) {
   );
 }
 
-pw.Widget _laneRow(
-  DayCellMarkerData marker,
-  ReportLegendEntry entry,
-  bool firstOfMonth,
-  _ReportFonts fonts,
-) {
-  final item = marker.medicationMarkers
-      .where((item) => item.laneIndex == entry.laneIndex)
-      .firstOrNull;
-  if (item == null) return pw.SizedBox(height: 6);
-  return pw.SizedBox(
-    height: 6,
-    child: pw.Row(
-      children: [
-        pw.SizedBox(
-          width: 9,
-          child: item.startsWindow || firstOfMonth
-              ? pw.Text(
-                  entry.label,
-                  style: pw.TextStyle(font: fonts.mono, fontSize: 5),
-                )
-              : null,
-        ),
-        _textureBand(
-          Markers.print.lane(entry.laneIndex).texture,
-          width: 40,
-          height: 3,
-        ),
-      ],
-    ),
-  );
-}
-
-pw.Widget _textureBand(
-  MarkerTexture texture, {
+pw.Widget _printCourseBand({
+  required MarkerTexture texture,
   required double width,
   required double height,
-}) => pw.CustomPaint(
-  size: PdfPoint(width, height),
-  painter: (canvas, size) {
-    final (mark, gap) = MarkerTextureMetrics.forTexture(texture, size.x);
-    canvas.setFillColor(PdfColors.black);
-    for (var left = 0.0; left < size.x; left += mark + gap) {
-      canvas.drawRect(left, 0, (left + mark).clamp(0, size.x) - left, size.y);
-      canvas.fillPath();
-    }
+  required bool capStart,
+  required bool capEnd,
+  String? name,
+  required _ReportFonts fonts,
+}) => pw.Stack(
+  children: [
+    pw.CustomPaint(
+      size: PdfPoint(width, height),
+      painter: (canvas, size) {
+        canvas
+          ..setStrokeColor(PdfColors.black)
+          ..setLineWidth(1)
+          ..setLineDashPattern(reportDashPattern(texture))
+          ..setLineCap(PdfLineCap.butt);
+        final radius = size.y / 2;
+        if (capStart && capEnd) {
+          canvas.drawRRect(0.5, 0.5, size.x - 1, size.y - 1, radius, radius);
+        } else {
+          canvas
+            ..moveTo(capStart ? radius : 0, size.y - 0.5)
+            ..lineTo(capEnd ? size.x - radius : size.x, size.y - 0.5);
+          if (capEnd) {
+            canvas
+              ..curveTo(
+                size.x - radius / 2,
+                size.y - 0.5,
+                size.x - 0.5,
+                size.y - radius / 2,
+                size.x - 0.5,
+                radius,
+              )
+              ..curveTo(
+                size.x - 0.5,
+                radius / 2,
+                size.x - radius / 2,
+                0.5,
+                size.x - radius,
+                0.5,
+              );
+          } else {
+            canvas.moveTo(size.x, 0.5);
+          }
+          canvas.lineTo(capStart ? radius : 0, 0.5);
+          if (capStart) {
+            canvas
+              ..curveTo(radius / 2, 0.5, 0.5, radius / 2, 0.5, radius)
+              ..curveTo(
+                0.5,
+                size.y - radius / 2,
+                radius / 2,
+                size.y - 0.5,
+                radius,
+                size.y - 0.5,
+              );
+          }
+        }
+        canvas.strokePath();
+        canvas.setLineDashPattern();
+      },
+    ),
+    if (name != null)
+      pw.Positioned.fill(
+        child: pw.Padding(
+          padding: const pw.EdgeInsets.symmetric(horizontal: 4),
+          child: pw.Align(
+            alignment: pw.Alignment.centerLeft,
+            child: pw.Text(
+              name,
+              maxLines: 1,
+              style: pw.TextStyle(font: fonts.sansBold, fontSize: 6.5),
+            ),
+          ),
+        ),
+      ),
+  ],
+);
+
+pw.Widget _printTodayRing(double size) => pw.CustomPaint(
+  size: PdfPoint(size, size),
+  painter: (canvas, dimensions) {
+    canvas
+      ..setStrokeColor(PdfColors.black)
+      ..setLineWidth(1.2)
+      ..setLineDashPattern(const [2, 2])
+      ..drawEllipse(
+        dimensions.x / 2,
+        dimensions.y / 2,
+        dimensions.x / 2 - 1,
+        dimensions.y / 2 - 1,
+      )
+      ..strokePath()
+      ..setLineDashPattern();
   },
 );
 
@@ -917,10 +1109,13 @@ String _formatMean(double mean) => mean == mean.roundToDouble()
 String _printCount(int count) => count == 0 ? '·' : '$count';
 
 double _monthCellHeight(int medicationCount) =>
-    52 + (medicationCount > 4 ? medicationCount - 4 : 0) * 7;
+    45 + medicationCount * _printLanePitch;
 
-const _periodShade = PdfColor.fromInt(0xFFE3E3E3);
 const _rule = PdfColor.fromInt(0xffb3b3b3);
+const _muted = PdfColor.fromInt(0xff777777);
+const _printDateAreaHeight = 30.0;
+const _printLaneHeight = 10.0;
+const _printLanePitch = 12.0;
 const _pageMargin = 24.0;
 const _matrixNameWidth = 150.0;
 const _matrixAllWidth = 35.0;
@@ -930,3 +1125,9 @@ const _monthWidth = 52.0;
 
 double get reportPortraitContentWidth =>
     PdfPageFormat.a4.width - _pageMargin * 2;
+
+List<num> reportDashPattern(MarkerTexture texture) {
+  if (texture == MarkerTexture.solid) return const [];
+  final (mark, gap) = MarkerTextureMetrics.forTexture(texture, 0);
+  return [mark, gap];
+}

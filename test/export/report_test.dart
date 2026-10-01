@@ -78,19 +78,20 @@ void main() {
     },
   );
 
-  test('report uses the shared marker texture metrics', () {
-    expect(MarkerTextureMetrics.forTexture(MarkerTexture.dotted, 24), (
-      MarkerTextureMetrics.dottedMark,
-      MarkerTextureMetrics.dottedGap,
-    ));
-    expect(MarkerTextureMetrics.forTexture(MarkerTexture.dashed, 24), (
-      MarkerTextureMetrics.dashedMark,
-      MarkerTextureMetrics.dashedGap,
-    ));
-    expect(MarkerTextureMetrics.forTexture(MarkerTexture.dashed, 24), (
-      8.0,
-      4.0,
-    ));
+  test('report dash patterns use the shared marker texture metrics', () {
+    final patterns = {
+      for (final texture in MarkerTexture.values)
+        texture: reportDashPattern(texture),
+    };
+    expect(patterns[MarkerTexture.solid], isEmpty);
+    for (final texture in MarkerTexture.values.skip(1)) {
+      final (mark, gap) = MarkerTextureMetrics.forTexture(texture, 0);
+      expect(patterns[texture], [mark, gap]);
+    }
+    expect(
+      patterns.values.map((pattern) => pattern.join(',')).toSet(),
+      hasLength(MarkerTexture.values.length),
+    );
   });
 
   test('every report page is portrait A4', () async {
@@ -165,9 +166,8 @@ void main() {
       expect(letterhead, contains('15 Jun 26'));
       expect(letterhead, contains('1 Apr 26-15 Jun 26'));
       expect(data.legendEntries, hasLength(1));
-      expect(data.legendEntries.single.label, 'L1');
-      expect(letterhead, isNot(contains('>L1 ')));
-      expect(letterhead, isNot(contains('>L2 ')));
+      expect(data.legendEntries.single.medication.name, 'Progesterone');
+      expect(letterhead, isNot(contains(RegExp(r'>L[123] '))));
       expect(letterhead, isNot(contains('{{EXPORT_DATE}}')));
       expect(letterhead, isNot(contains('{{RANGE}}')));
       expect(letterhead, isNot(contains('{{MED_1}}')));
@@ -264,10 +264,10 @@ void main() {
       expect(windows.single.end, DateTime(2026, 9, 14));
       expect(data.months, [DateTime(2026, 8), DateTime(2026, 9)]);
       expect(data.legendEntries, hasLength(1));
-      expect(data.legendEntries.single.label, 'L1');
+      expect(data.legendEntries.single.medication.name, 'Progesterone');
       expect(
-        data.legendEntries.map((entry) => entry.label),
-        isNot(contains('L2')),
+        data.legendEntries.map((entry) => entry.medication.name),
+        everyElement(isNot(contains(RegExp(r'^L[123]$')))),
       );
       expect(data.cycleDayMatrixChunks, hasLength(3));
       expect(data.cycleDayMatrixChunks[0].headers, [

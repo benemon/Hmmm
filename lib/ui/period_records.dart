@@ -4,7 +4,10 @@ import 'package:flutter/semantics.dart';
 import '../data/period_repository.dart';
 import '../domain/calendar.dart';
 import '../domain/cycle_lengths.dart';
+import '../domain/dates.dart';
 import '../domain/models.dart';
+import '../domain/periods.dart';
+import '../domain/validation.dart';
 import 'empty_state.dart';
 import 'feedback.dart';
 import 'format.dart';
@@ -77,9 +80,12 @@ Future<void> showPeriodRecordEditor(
   if (draft == null || !context.mounted) return;
   try {
     if (period == null) {
-      await repository.insert(
-        Period(start: draft.start, end: draft.end),
+      await insertPeriodWithEndPrompts(
+        context,
+        repository: repository,
         today: today,
+        start: draft.start,
+        end: draft.end,
       );
     } else {
       await repository.update(
@@ -91,6 +97,105 @@ Future<void> showPeriodRecordEditor(
     if (context.mounted) showValidationError(context, error);
   }
 }
+
+Future<void> insertPeriodWithEndPrompts(
+  BuildContext context, {
+  required PeriodRepository repository,
+  required DateTime today,
+  required DateTime start,
+  DateTime? end,
+}) async {
+  final existing = await repository.listPeriods();
+  validatePeriod(
+    Period(start: start, end: end),
+    existing,
+    today: today,
+  );
+  if (!context.mounted) return;
+
+  if (end == null) {
+    final ongoing = derivePeriods(existing)
+        .where((period) => period.isOngoing)
+        .firstOrNull;
+    if (ongoing != null && start.isAfter(ongoing.period.start)) {
+      final lastDate = addCalendarDays(start, -1);
+      final resolution = await _askForEndDate(
+        context,
+        title:
+            'End date for the period starting '
+            '${formatDate(ongoing.period.start)}?',
+        start: ongoing.period.start,
+        initialDate: lastDate,
+        lastDate: lastDate,
+      );
+      if (resolution == null || !context.mounted) return;
+      if (resolution.end != null) {
+        await repository.update(
+          Period(
+            id: ongoing.period.id,
+            start: ongoing.period.start,
+            end: resolution.end,
+          ),
+          today: today,
+        );
+      }
+    } else if (existing.any((period) => period.start.isAfter(start))) {
+      final resolution = await _askForEndDate(
+        context,
+        title: 'End date?',
+        start: start,
+        initialDate: start,
+        lastDate: dateOnly(today),
+      );
+      if (resolution == null || !context.mounted) return;
+      end = resolution.end;
+    }
+  }
+
+  await repository.insert(
+    Period(start: start, end: end),
+    today: today,
+  );
+}
+
+Future<({DateTime? end})?> _askForEndDate(
+  BuildContext context, {
+  required String title,
+  required DateTime start,
+  required DateTime initialDate,
+  required DateTime lastDate,
+}) async {
+  final action = await showDialog<_EndPromptAction>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: Text(formatDate(start), style: HmmmType.of(context).figure),
+      actions: [
+        TextButton(
+          onPressed: () =>
+              Navigator.pop(context, _EndPromptAction.recordAsOneDay),
+          child: const Text('Record as 1 day'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _EndPromptAction.chooseEnd),
+          child: const Text('Choose end'),
+        ),
+      ],
+    ),
+  );
+  if (action == null) return null;
+  if (action == _EndPromptAction.recordAsOneDay) return (end: null);
+  if (!context.mounted) return null;
+  final selected = await pickDate(
+    context,
+    initialDate,
+    lastDate,
+    firstDate: start,
+  );
+  return selected == null ? null : (end: selected);
+}
+
+enum _EndPromptAction { chooseEnd, recordAsOneDay }
 
 class _PeriodList extends StatelessWidget {
   const _PeriodList({
@@ -113,10 +218,11 @@ class _PeriodList extends StatelessWidget {
         action: 'Record a period start from any day in the calendar.',
       );
     }
+    final derivedPeriods = derivePeriods(periods);
     final cycleLengths = cycleLengthsToNext(periods);
     final newestFirst = [
-      for (var index = periods.length - 1; index >= 0; index--)
-        (period: periods[index], cycleLength: cycleLengths[index]),
+      for (var index = derivedPeriods.length - 1; index >= 0; index--)
+        (period: derivedPeriods[index], cycleLength: cycleLengths[index]),
     ];
 
     return ListView.separated(
@@ -124,8 +230,10 @@ class _PeriodList extends StatelessWidget {
       separatorBuilder: (context, index) => const Divider(),
       itemBuilder: (context, index) {
         final record = newestFirst[index];
-        final period = record.period;
-        final duration = recordedPeriodLength(period, today);
+        final derived = record.period;
+        final period = derived.period;
+        final duration = recordedPeriodLength(derived, today);
+        final rangeEnd = derived.isOngoing ? null : derived.displayEnd(today);
         return Dismissible(
           key: ValueKey('period-${period.id}'),
           direction: DismissDirection.endToStart,
@@ -142,14 +250,13 @@ class _PeriodList extends StatelessWidget {
                 children: [
                   Icon(
                     Icons.delete_outline,
-                    color: Theme.of(context).colorScheme.onError,
+                    color: Markers.of(context).inkOnBand,
                   ),
                   const SizedBox(width: Dim.s2),
                   Text(
                     'Delete',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Theme.of(context).colorScheme.onError,
-                    ),
+                    style: Theme.of(context).textTheme.bodyLarge
+                        ?.copyWith(color: Markers.of(context).inkOnBand),
                   ),
                 ],
               ),
@@ -167,11 +274,14 @@ class _PeriodList extends StatelessWidget {
               constraints: const BoxConstraints(minHeight: Dim.rowMinHeight),
               child: ListTile(
                 title: Text(
-                  formatPeriodRange(period.start, period.end),
+                  formatPeriodRange(period.start, rangeEnd),
                   style: HmmmType.of(context).figure,
                 ),
                 subtitle: Text(
-                  period.end == null
+                  derived.isEndNotRecorded
+                      ? '1 day · end not recorded'
+                            '${record.cycleLength == null ? '' : ' · ${record.cycleLength}-day cycle'}'
+                      : derived.isOngoing
                       ? '$duration days so far'
                       : '$duration days'
                             '${record.cycleLength == null ? '' : ' · ${record.cycleLength}-day cycle'}',
