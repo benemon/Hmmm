@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1626,6 +1628,8 @@ void main() {
     await _pumpFrames(tester);
     await tester.tap(find.text('Import data'));
     await _pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('file-action-paste')));
+    await _pumpFrames(tester);
 
     expect(find.byKey(const ValueKey('import-json-text')), findsOneWidget);
     await tester.enterText(
@@ -1640,6 +1644,86 @@ void main() {
     await tester.tap(find.text('Cancel'));
     await _pumpFrames(tester);
     expect(find.text('Export & print'), findsOneWidget);
+  });
+
+  testWidgets('export data saves a file through the document picker', (
+    tester,
+  ) async {
+    final calls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('hmmm/documents'),
+      (call) async {
+        calls.add(call);
+        return true;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('hmmm/documents'),
+        null,
+      ),
+    );
+    await periods.insert(
+      Period(start: DateTime(2026, 6, 1), end: DateTime(2026, 6, 4)),
+      today: today,
+    );
+    await pumpApp(tester);
+    await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Export & print'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Export data'));
+    await _pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('file-action-save')));
+    await _pumpFrames(tester);
+
+    expect(calls.single.method, 'save');
+    final arguments = calls.single.arguments as Map;
+    expect(arguments['name'], 'hmmm-data.json');
+    expect(arguments['mimeType'], 'application/json');
+    final saved = utf8.decode(arguments['bytes'] as Uint8List);
+    expect(
+      saved,
+      await JsonBackupRepository(database).export(exportedAt: today),
+    );
+    expect(find.text('Saved hmmm-data.json'), findsOneWidget);
+  });
+
+  testWidgets('import data opens a file and replaces the record', (
+    tester,
+  ) async {
+    await periods.insert(
+      Period(start: DateTime(2026, 5, 1), end: DateTime(2026, 5, 4)),
+      today: today,
+    );
+    final backup = await JsonBackupRepository(database)
+        .export(exportedAt: today);
+    await periods.delete((await periods.listPeriods()).single.id!);
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('hmmm/documents'),
+      (call) async => call.method == 'open'
+          ? Uint8List.fromList(utf8.encode(backup))
+          : null,
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('hmmm/documents'),
+        null,
+      ),
+    );
+    await pumpApp(tester);
+    await tester.tap(find.text('SETTINGS'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Export & print'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Import data'));
+    await _pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('file-action-open')));
+    await _pumpFrames(tester);
+    await tester.tap(find.byKey(const ValueKey('confirm-import-json')));
+    await _pumpFrames(tester);
+
+    expect((await periods.listPeriods()).single.start, DateTime(2026, 5, 1));
   });
 
   testWidgets('export range descriptions include a future derived course', (

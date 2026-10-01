@@ -1,7 +1,8 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -171,7 +172,7 @@ class SettingsScreen extends StatelessWidget {
       range: export.range,
       exportedAt: today,
     );
-    await _shareTextFile(
+    await _exportFile(
       context,
       text,
       name: 'hmmm-calendar.ics',
@@ -182,7 +183,7 @@ class SettingsScreen extends StatelessWidget {
   Future<void> _exportJson(BuildContext context) async {
     final text = await backupRepository.export(exportedAt: today);
     if (!context.mounted) return;
-    await _shareTextFile(
+    await _exportFile(
       context,
       text,
       name: 'hmmm-data.json',
@@ -191,31 +192,7 @@ class SettingsScreen extends StatelessWidget {
   }
 
   Future<void> _importJson(BuildContext context) async {
-    var input = '';
-    final source = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Import data'),
-        content: TextField(
-          key: const ValueKey('import-json-text'),
-          autofocus: true,
-          minLines: 8,
-          maxLines: 16,
-          onChanged: (value) => input = value,
-          decoration: const InputDecoration(hintText: 'Paste JSON'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, input),
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
-    );
+    final source = await _chooseImportSource(context);
     if (source == null || !context.mounted) return;
     try {
       parseJsonExport(source);
@@ -721,6 +698,109 @@ String _periodDetail(List<Period> periods) {
 }
 
 String _count(int count, String noun) => '$count $noun${count == 1 ? '' : 's'}';
+
+const _documents = MethodChannel('hmmm/documents');
+
+enum _FileAction { save, share, open, paste }
+
+Future<_FileAction?> _chooseFileAction(
+  BuildContext context,
+  String title,
+  List<(_FileAction, String)> actions,
+) => showDialog<_FileAction>(
+  context: context,
+  builder: (context) => SimpleDialog(
+    title: Text(title),
+    children: [
+      for (final (action, label) in actions)
+        SimpleDialogOption(
+          key: ValueKey('file-action-${action.name}'),
+          onPressed: () => Navigator.pop(context, action),
+          child: Text(label),
+        ),
+    ],
+  ),
+);
+
+Future<void> _exportFile(
+  BuildContext context,
+  String text, {
+  required String name,
+  required String mimeType,
+}) async {
+  if (defaultTargetPlatform != TargetPlatform.android) {
+    await _shareTextFile(context, text, name: name, mimeType: mimeType);
+    return;
+  }
+  final action = await _chooseFileAction(context, name, const [
+    (_FileAction.save, 'Save to file'),
+    (_FileAction.share, 'Share'),
+  ]);
+  if (action == null || !context.mounted) return;
+  if (action == _FileAction.share) {
+    await _shareTextFile(context, text, name: name, mimeType: mimeType);
+    return;
+  }
+  try {
+    final saved = await _documents.invokeMethod<bool>('save', {
+      'name': name,
+      'mimeType': mimeType,
+      'bytes': Uint8List.fromList(utf8.encode(text)),
+    });
+    if (saved == true && context.mounted) showMessage(context, 'Saved $name');
+  } on PlatformException {
+    if (context.mounted) showMessage(context, 'File could not be saved.');
+  }
+}
+
+Future<String?> _chooseImportSource(BuildContext context) async {
+  if (defaultTargetPlatform != TargetPlatform.android) {
+    return _pasteJson(context);
+  }
+  final action = await _chooseFileAction(context, 'Import data', const [
+    (_FileAction.open, 'Open file'),
+    (_FileAction.paste, 'Paste JSON'),
+  ]);
+  if (action == null || !context.mounted) return null;
+  if (action == _FileAction.paste) return _pasteJson(context);
+  try {
+    final bytes = await _documents.invokeMethod<Uint8List>('open');
+    return bytes == null ? null : utf8.decode(bytes);
+  } on PlatformException {
+    if (context.mounted) showMessage(context, 'File could not be read.');
+  } on FormatException {
+    if (context.mounted) showMessage(context, 'File is not UTF-8 text.');
+  }
+  return null;
+}
+
+Future<String?> _pasteJson(BuildContext context) {
+  var input = '';
+  return showDialog<String>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Import data'),
+      content: TextField(
+        key: const ValueKey('import-json-text'),
+        autofocus: true,
+        minLines: 8,
+        maxLines: 16,
+        onChanged: (value) => input = value,
+        decoration: const InputDecoration(hintText: 'Paste JSON'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, input),
+          child: const Text('Continue'),
+        ),
+      ],
+    ),
+  );
+}
 
 Future<void> _shareTextFile(
   BuildContext context,

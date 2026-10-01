@@ -33,16 +33,19 @@ Offline period, HRT, and symptom tracker for Android, built with Flutter.
 
 Releases up to v0.3.2 were each signed with a different key, and Android only
 installs an update signed with the same key as the installed app. Moving from
-one of those releases to a later one needs a reinstall, and uninstalling
-deletes the app's data:
+one of those releases needs a reinstall, and uninstalling deletes the app's
+data, so take a backup file first:
 
-1. In Hmmm, open Settings > Export & print > Export data and keep the .json
-   file.
+1. In Hmmm, open Settings > Export & print > Export data. v0.3.2 can only
+   share the file, so share it to an app that keeps a copy on the phone.
 2. Uninstall Hmmm.
 3. Install the new release.
-4. Open Settings > Export & print > Import data and choose the .json file.
+4. Open Settings > Export & print > Import data > Open file and choose the
+   backup.
 
-Later releases share one signing key and install over each other.
+From v0.4.1, Export data and Export calendar offer Save to file, and Import
+data opens a file. Releases from v0.4.0 share one signing key and install over
+each other.
 
 Brand assets live in [`brand/`](brand/) with usage rules in
 [`brand/README.md`](brand/README.md).
